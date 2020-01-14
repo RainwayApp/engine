@@ -540,7 +540,9 @@ void FlutterPlatformViewsController::EnsureOverlayInitialized(
                flutterViewController:(UIViewController*)flutterViewController {
   self = [super initWithFrame:embeddedView.frame];
   if (self) {
+#if !TARGET_OS_TV
     self.multipleTouchEnabled = YES;
+#endif
     embeddedView.autoresizingMask =
         (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
 

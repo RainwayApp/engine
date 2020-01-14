@@ -297,7 +297,7 @@ static BOOL isPowerOfTwo(NSUInteger x) {
 
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
     didReceiveNotificationResponse:(UNNotificationResponse*)response
-             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) {
+             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) API_UNAVAILABLE(tvos) {
   if (@available(iOS 10.0, *)) {
     for (id<FlutterApplicationLifeCycleDelegate> delegate in _delegates) {
       if ([delegate respondsToSelector:_cmd]) {

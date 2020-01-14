@@ -102,13 +102,13 @@ source_set("fml") {
 
   libs = []
 
-  if (is_ios || is_mac) {
+  if (is_ios || is_tvos || is_mac) {
     sources += [ "platform/posix/shared_mutex_posix.cc" ]
   } else {
     sources += [ "synchronization/shared_mutex_std.cc" ]
   }
 
-  if (is_ios || is_mac) {
+  if (is_ios || is_tvos || is_mac) {
     sources += [
       "platform/darwin/cf_utils.cc",
       "platform/darwin/cf_utils.h",

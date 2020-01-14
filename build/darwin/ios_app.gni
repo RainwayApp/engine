@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 template("ios_app") {
-  assert(is_ios)
+  assert(is_ios || is_tvos)
 
   copy("${target_name}__info_plist") {
     sources = [

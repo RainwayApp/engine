@@ -58,7 +58,9 @@ typedef enum UIAccessibilityContrast : NSInteger {
   fml::scoped_nsobject<UIView> _splashScreenView;
   fml::ScopedBlock<void (^)(void)> _flutterViewRenderedCallback;
   UIInterfaceOrientationMask _orientationPreferences;
+#if !TARGET_OS_TV
   UIStatusBarStyle _statusBarStyle;
+#endif
   flutter::ViewportMetrics _viewportMetrics;
   BOOL _initialized;
   BOOL _viewOpaque;
@@ -143,8 +145,10 @@ typedef enum UIAccessibilityContrast : NSInteger {
 
   _initialized = YES;
 
+#if !TARGET_OS_TV
   _orientationPreferences = UIInterfaceOrientationMaskAll;
   _statusBarStyle = UIStatusBarStyleDefault;
+#endif
 
   [self setupNotificationCenterObservers];
 }
@@ -189,6 +193,7 @@ typedef enum UIAccessibilityContrast : NSInteger {
                  name:UIApplicationWillEnterForegroundNotification
                object:nil];
 
+#if !TARGET_OS_TV
   [center addObserver:self
              selector:@selector(keyboardWillChangeFrame:)
                  name:UIKeyboardWillChangeFrameNotification
@@ -198,6 +203,7 @@ typedef enum UIAccessibilityContrast : NSInteger {
              selector:@selector(keyboardWillBeHidden:)
                  name:UIKeyboardWillHideNotification
                object:nil];
+#endif
 
   [center addObserver:self
              selector:@selector(onLocaleUpdated:)
@@ -256,7 +262,9 @@ typedef enum UIAccessibilityContrast : NSInteger {
 
 - (void)loadView {
   self.view = _flutterView.get();
+#if !TARGET_OS_TV
   self.view.multipleTouchEnabled = YES;
+#endif
   self.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
   [self installSplashScreenViewIfNecessary];
@@ -745,12 +753,16 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 }
 
 - (CGFloat)statusBarPadding {
+#if TARGET_OS_TV
+  return 0.0;
+#else
   UIScreen* screen = self.view.window.screen;
   CGRect statusFrame = [UIApplication sharedApplication].statusBarFrame;
   CGRect viewFrame = [self.view convertRect:self.view.bounds
                           toCoordinateSpace:screen.coordinateSpace];
   CGRect intersection = CGRectIntersection(statusFrame, viewFrame);
   return CGRectIsNull(intersection) ? 0.0 : intersection.size.height;
+#endif
 }
 
 - (void)viewDidLayoutSubviews {
@@ -809,7 +821,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
 #pragma mark - Keyboard events
 
-- (void)keyboardWillChangeFrame:(NSNotification*)notification {
+- (void)keyboardWillChangeFrame:(NSNotification*)notification API_UNAVAILABLE(tvos) {
   NSDictionary* info = [notification userInfo];
   CGFloat bottom = CGRectGetHeight([[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue]);
   CGFloat scale = [UIScreen mainScreen].scale;
@@ -828,7 +840,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
 #pragma mark - Orientation updates
 
-- (void)onOrientationPreferencesUpdated:(NSNotification*)notification {
+- (void)onOrientationPreferencesUpdated:(NSNotification*)notification API_UNAVAILABLE(tvos) {
   // Notifications may not be on the iOS UI thread
   dispatch_async(dispatch_get_main_queue(), ^{
     NSDictionary* info = notification.userInfo;
@@ -842,7 +854,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
   });
 }
 
-- (void)performOrientationUpdate:(UIInterfaceOrientationMask)new_preferences {
+- (void)performOrientationUpdate:(UIInterfaceOrientationMask)new_preferences API_UNAVAILABLE(tvos) {
   if (new_preferences != _orientationPreferences) {
     _orientationPreferences = new_preferences;
     [UIViewController attemptRotationToDeviceOrientation];
@@ -1066,6 +1078,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
   }
 }
 
+#if !TARGET_OS_TV
 #pragma mark - Status Bar touch event handling
 
 // Standard iOS status bar height in points.
@@ -1127,6 +1140,7 @@ constexpr CGFloat kStandardStatusBarHeight = 20.0;
     }
   });
 }
+#endif
 
 #pragma mark - Platform views
 
