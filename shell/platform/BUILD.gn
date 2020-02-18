@@ -5,7 +5,7 @@
 import("//build/fuchsia/sdk.gni")
 
 group("platform") {
-  if (is_mac || is_ios || is_tvos) {
+  if (is_mac || is_ios) {
     deps = [
       "darwin",
     ]

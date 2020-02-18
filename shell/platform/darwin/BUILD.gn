@@ -2,12 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-assert(is_mac || is_ios || is_tvos)
+assert(is_mac || is_ios)
 
 import("$flutter_root/testing/testing.gni")
 
 group("darwin") {
-  if (is_ios || is_tvos) {
+  if (is_ios) {
     deps = [
       "ios:flutter_framework",
     ]
