@@ -687,7 +687,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
     pointer_data.radius_max = touch.majorRadius + touch.majorRadiusTolerance;
 
     // These properties were introduced in iOS 9.1
-    if (@available(iOS 9.1, *)) {
+    if (@available(iOS 9.1, tvOS 9.1, *)) {
       // iOS Documentation: altitudeAngle
       // A value of 0 radians indicates that the stylus is parallel to the surface. The value of
       // this property is Pi/2 when the stylus is perpendicular to the surface.
@@ -771,7 +771,15 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
   // First time since creation that the dimensions of its view is known.
   bool firstViewBoundsUpdate = !_viewportMetrics.physical_width;
+#if TARGET_OS_TV
+  // (lynn) We lie about the device_pixel_ratio to trick Flutter into rendering everything bigger.
+  _viewportMetrics.device_pixel_ratio = scale * 1.5;
+#else
   _viewportMetrics.device_pixel_ratio = scale;
+#endif
+  
+  // (lynn) But we shan't lie about the scale when reporting the physical screen size.
+  // Otherwise everything will be drawn on a scaled-up canvas that doesn't fit on the screen.
   _viewportMetrics.physical_width = viewSize.width * scale;
   _viewportMetrics.physical_height = viewSize.height * scale;
 
@@ -809,7 +817,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // Viewport padding represents the iOS safe area insets.
 - (void)updateViewportPadding {
   CGFloat scale = [UIScreen mainScreen].scale;
-  if (@available(iOS 11, *)) {
+  if (@available(iOS 11, tvOS 11, *)) {
     _viewportMetrics.physical_padding_top = self.view.safeAreaInsets.top * scale;
     _viewportMetrics.physical_padding_left = self.view.safeAreaInsets.left * scale;
     _viewportMetrics.physical_padding_right = self.view.safeAreaInsets.right * scale;
@@ -1048,7 +1056,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // is understood by the Flutter framework. See the settings system channel for more
 // information.
 - (NSString*)brightnessMode {
-  if (@available(iOS 13, *)) {
+  if (@available(iOS 13, tvOS 13, *)) {
     UIUserInterfaceStyle style = self.traitCollection.userInterfaceStyle;
 
     if (style == UIUserInterfaceStyleDark) {
@@ -1065,7 +1073,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // understood by the Flutter framework. See the settings system channel for more
 // information.
 - (NSString*)contrastMode {
-  if (@available(iOS 13, *)) {
+  if (@available(iOS 13, tvOS 13, *)) {
     UIAccessibilityContrast contrast = self.traitCollection.accessibilityContrast;
 
     if (contrast == UIAccessibilityContrastHigh) {
@@ -1086,7 +1094,7 @@ constexpr CGFloat kStandardStatusBarHeight = 20.0;
 
 - (void)handleStatusBarTouches:(UIEvent*)event {
   CGFloat standardStatusBarHeight = kStandardStatusBarHeight;
-  if (@available(iOS 11, *)) {
+  if (@available(iOS 11, tvOS 11, *)) {
     standardStatusBarHeight = self.view.safeAreaInsets.top;
   }
 

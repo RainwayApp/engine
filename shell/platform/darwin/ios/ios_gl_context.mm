@@ -30,7 +30,7 @@ IOSGLContext::IOSGLContext() {
   // device properties.  Ex: We can indicate that we have rendered in P3, and
   // the framework will do the final adjustment for us.
   color_space_ = SkColorSpace::MakeSRGB();
-  if (@available(iOS 10, *)) {
+  if (@available(iOS 10, tvOS 10, *)) {
     UIDisplayGamut displayGamut = [UIScreen mainScreen].traitCollection.displayGamut;
     switch (displayGamut) {
       case UIDisplayGamutP3:

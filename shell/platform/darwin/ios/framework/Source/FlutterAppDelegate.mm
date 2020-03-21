@@ -104,8 +104,8 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
        willPresentNotification:(UNNotification*)notification
          withCompletionHandler:
              (void (^)(UNNotificationPresentationOptions options))completionHandler
-    NS_AVAILABLE_IOS(10_0) {
-  if (@available(iOS 10.0, *)) {
+    NS_AVAILABLE_IOS(10_0) __TVOS_AVAILABLE(10_0) {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if ([_lifeCycleDelegate respondsToSelector:_cmd]) {
       [_lifeCycleDelegate userNotificationCenter:center
                          willPresentNotification:notification
@@ -119,8 +119,8 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
  */
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
     didReceiveNotificationResponse:(UNNotificationResponse*)response
-             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) API_UNAVAILABLE(tvos) {
-  if (@available(iOS 10.0, *)) {
+             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) __TVOS_UNAVAILABLE {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if ([_lifeCycleDelegate respondsToSelector:_cmd]) {
       [_lifeCycleDelegate userNotificationCenter:center
                   didReceiveNotificationResponse:response

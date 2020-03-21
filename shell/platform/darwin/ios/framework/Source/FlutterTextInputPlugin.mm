@@ -68,7 +68,7 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
   if ([inputType isEqualToString:@"TextInputAction.next"])
     return UIReturnKeyNext;
 
-  if (@available(iOS 9.0, *))
+  if (@available(iOS 9.0, tvOS 9.0, *))
     if ([inputType isEqualToString:@"TextInputAction.continueAction"])
       return UIReturnKeyContinue;
 
@@ -159,8 +159,8 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
 @property(nonatomic) UIKeyboardType keyboardType;
 @property(nonatomic) UIReturnKeyType returnKeyType;
 @property(nonatomic, getter=isSecureTextEntry) BOOL secureTextEntry;
-@property(nonatomic) UITextSmartQuotesType smartQuotesType API_AVAILABLE(ios(11.0));
-@property(nonatomic) UITextSmartDashesType smartDashesType API_AVAILABLE(ios(11.0));
+@property(nonatomic) UITextSmartQuotesType smartQuotesType API_AVAILABLE(ios(11.0), tvos(11.0));
+@property(nonatomic) UITextSmartDashesType smartDashesType API_AVAILABLE(ios(11.0), tvos(11.0));
 
 @property(nonatomic, assign) id<FlutterTextInputDelegate> textInputDelegate;
 
@@ -195,7 +195,7 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
     _keyboardType = UIKeyboardTypeDefault;
     _returnKeyType = UIReturnKeyDone;
     _secureTextEntry = NO;
-    if (@available(iOS 11.0, *)) {
+    if (@available(iOS 11.0, tvOS 11.0, *)) {
       _smartQuotesType = UITextSmartQuotesTypeYes;
       _smartDashesType = UITextSmartDashesTypeYes;
     }
@@ -770,7 +770,7 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
   _activeView.keyboardType = ToUIKeyboardType(inputType);
   _activeView.returnKeyType = ToUIReturnKeyType(configuration[@"inputAction"]);
   _activeView.autocapitalizationType = ToUITextAutoCapitalizationType(configuration);
-  if (@available(iOS 11.0, *)) {
+  if (@available(iOS 11.0, tvOS 11.0, *)) {
     NSString* smartDashesType = configuration[@"smartDashesType"];
     // This index comes from the SmartDashesType enum in the framework.
     bool smartDashesIsDisabled = smartDashesType && [smartDashesType isEqualToString:@"0"];
