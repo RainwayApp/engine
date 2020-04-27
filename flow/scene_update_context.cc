@@ -57,38 +57,24 @@ SceneUpdateContext::SceneUpdateContext(scenic::Session* session,
 }
 
 void SceneUpdateContext::CreateFrame(scenic::EntityNode entity_node,
-                                     scenic::ShapeNode shape_node,
                                      const SkRRect& rrect,
                                      SkColor color,
-                                     float opacity,
+                                     SkAlpha opacity,
                                      const SkRect& paint_bounds,
                                      std::vector<Layer*> paint_layers,
                                      Layer* layer) {
-  // We don't need a shape if the frame is zero size.
-  if (rrect.isEmpty())
-    return;
+  FML_DCHECK(!rrect.isEmpty());
 
-  SetEntityNodeClipPlanes(entity_node, rrect.getBounds());
+  // Frames always clip their children.
+  SkRect shape_bounds = rrect.getBounds();
+  SetEntityNodeClipPlanes(entity_node, shape_bounds);
 
-  // isEmpty should account for this, but we are adding these experimental
-  // checks to validate if this is the root cause for b/144933519.
-  if (std::isnan(rrect.width()) || std::isnan(rrect.height())) {
-    FML_LOG(ERROR) << "Invalid RoundedRectangle";
-    return;
-  }
-
-  // Add a part which represents the frame's geometry for clipping purposes
   // and possibly for its texture.
   // TODO(SCN-137): Need to be able to express the radii as vectors.
-  SkRect shape_bounds = rrect.getBounds();
-  scenic::RoundedRectangle shape(
-      session_,                                      // session
-      rrect.width(),                                 // width
-      rrect.height(),                                // height
-      rrect.radii(SkRRect::kUpperLeft_Corner).x(),   // top_left_radius
-      rrect.radii(SkRRect::kUpperRight_Corner).x(),  // top_right_radius
-      rrect.radii(SkRRect::kLowerRight_Corner).x(),  // bottom_right_radius
-      rrect.radii(SkRRect::kLowerLeft_Corner).x()    // bottom_left_radius
+  scenic::ShapeNode shape_node(session());
+  scenic::Rectangle shape(session_,       // session
+                          rrect.width(),  // width
+                          rrect.height()  // height
   );
   shape_node.SetShape(shape);
   shape_node.SetTranslation(shape_bounds.width() * 0.5f + shape_bounds.left(),
@@ -99,48 +85,57 @@ void SceneUpdateContext::CreateFrame(scenic::EntityNode entity_node,
   if (paint_bounds.isEmpty() || !paint_bounds.intersects(shape_bounds))
     paint_layers.clear();
 
+  scenic::Material material(session());
+  shape_node.SetMaterial(material);
+  entity_node.AddChild(shape_node);
+
   // Check whether a solid color will suffice.
   if (paint_layers.empty()) {
-    scenic::Material material(session_);
     SetMaterialColor(material, color, opacity);
-    shape_node.SetMaterial(material);
-    return;
+  } else {
+    // Apply current metrics and transformation scale factors.
+    const float scale_x = ScaleX();
+    const float scale_y = ScaleY();
+
+    // Apply a texture to the whole shape.
+    SetMaterialTextureAndColor(material, color, opacity, scale_x, scale_y,
+                               shape_bounds, std::move(paint_layers), layer,
+                               std::move(entity_node));
   }
+}
 
-  // Apply current metrics and transformation scale factors.
-  const float scale_x = ScaleX();
-  const float scale_y = ScaleY();
-
+void SceneUpdateContext::SetMaterialTextureAndColor(
+    scenic::Material& material,
+    SkColor color,
+    SkAlpha opacity,
+    SkScalar scale_x,
+    SkScalar scale_y,
+    const SkRect& paint_bounds,
+    std::vector<Layer*> paint_layers,
+    Layer* layer,
+    scenic::EntityNode entity_node) {
   scenic::Image* image = GenerateImageIfNeeded(
-      color, scale_x, scale_y, shape_bounds, std::move(paint_layers), layer,
+      color, scale_x, scale_y, paint_bounds, std::move(paint_layers), layer,
       std::move(entity_node));
-  if (image != nullptr) {
-    scenic::Material material(session_);
 
+  if (image != nullptr) {
     // The final shape's color is material_color * texture_color.  The passed in
     // material color was already used as a background when generating the
     // texture, so set the model color to |SK_ColorWHITE| in order to allow
     // using the texture's color unmodified.
     SetMaterialColor(material, SK_ColorWHITE, opacity);
     material.SetTexture(*image);
-    shape_node.SetMaterial(material);
-    return;
-  }
-
-  // No texture was needed, so apply a solid color to the whole shape.
-  if (SkColorGetA(color) != 0 && opacity != 0.0f) {
-    scenic::Material material(session_);
-
+  } else {
+    // No texture was needed, so apply a solid color to the whole shape.
     SetMaterialColor(material, color, opacity);
-    shape_node.SetMaterial(material);
-    return;
   }
 }
 
 void SceneUpdateContext::SetMaterialColor(scenic::Material& material,
                                           SkColor color,
-                                          float opacity) {
-  const SkAlpha color_alpha = (SkAlpha)(SkColorGetA(color) * opacity);
+                                          SkAlpha opacity) {
+  const SkAlpha color_alpha = static_cast<SkAlpha>(
+      ((float)SkColorGetA(color) * (float)opacity) / 255.0f);
   material.SetColor(SkColorGetR(color), SkColorGetG(color), SkColorGetB(color),
                     color_alpha);
 }
@@ -222,6 +217,9 @@ SceneUpdateContext::ExecutePaintTasks(CompositorContext::ScopedFrame& frame) {
     surfaces_to_submit.emplace_back(std::move(task.surface));
   }
   paint_tasks_.clear();
+  alpha_ = 1.f;
+  topmost_global_scenic_elevation_ = kScenicZElevationBetweenLayers;
+  scenic_elevation_ = 0.f;
   return surfaces_to_submit;
 }
 
@@ -231,7 +229,6 @@ SceneUpdateContext::Entity::Entity(SceneUpdateContext& context)
       entity_node_(context.session()) {
   if (previous_entity_)
     previous_entity_->embedder_node().AddChild(entity_node_);
-
   context.top_entity_ = this;
 }
 
@@ -245,27 +242,30 @@ SceneUpdateContext::Transform::Transform(SceneUpdateContext& context,
     : Entity(context),
       previous_scale_x_(context.top_scale_x_),
       previous_scale_y_(context.top_scale_y_) {
+  entity_node().SetLabel("flutter::Transform");
   if (!transform.isIdentity()) {
     // TODO(SCN-192): The perspective and shear components in the matrix
     // are not handled correctly.
     MatrixDecomposition decomposition(transform);
     if (decomposition.IsValid()) {
-      entity_node().SetTranslation(decomposition.translation().x(),  //
-                                   decomposition.translation().y(),  //
-                                   -decomposition.translation().z()  //
+      // Don't allow clients to control the z dimension; we control that
+      // instead to make sure layers appear in proper order.
+      entity_node().SetTranslation(decomposition.translation().x,  //
+                                   decomposition.translation().y,  //
+                                   0.f                             //
       );
 
-      entity_node().SetScale(decomposition.scale().x(),  //
-                             decomposition.scale().y(),  //
-                             decomposition.scale().z()   //
+      entity_node().SetScale(decomposition.scale().x,  //
+                             decomposition.scale().y,  //
+                             1.f                       //
       );
-      context.top_scale_x_ *= decomposition.scale().x();
-      context.top_scale_y_ *= decomposition.scale().y();
+      context.top_scale_x_ *= decomposition.scale().x;
+      context.top_scale_y_ *= decomposition.scale().y;
 
-      entity_node().SetRotation(decomposition.rotation().fData[0],  //
-                                decomposition.rotation().fData[1],  //
-                                decomposition.rotation().fData[2],  //
-                                decomposition.rotation().fData[3]   //
+      entity_node().SetRotation(decomposition.rotation().x,  //
+                                decomposition.rotation().y,  //
+                                decomposition.rotation().z,  //
+                                decomposition.rotation().w   //
       );
     }
   }
@@ -278,6 +278,7 @@ SceneUpdateContext::Transform::Transform(SceneUpdateContext& context,
     : Entity(context),
       previous_scale_x_(context.top_scale_x_),
       previous_scale_y_(context.top_scale_y_) {
+  entity_node().SetLabel("flutter::Transform");
   if (scale_x != 1.f || scale_y != 1.f || scale_z != 1.f) {
     entity_node().SetScale(scale_x, scale_y, scale_z);
     context.top_scale_x_ *= scale_x;
@@ -290,43 +291,58 @@ SceneUpdateContext::Transform::~Transform() {
   context().top_scale_y_ = previous_scale_y_;
 }
 
-SceneUpdateContext::Clip::Clip(SceneUpdateContext& context,
-                               const SkRect& shape_bounds)
-    : Entity(context) {
-  SetEntityNodeClipPlanes(entity_node(), shape_bounds);
-}
-
 SceneUpdateContext::Frame::Frame(SceneUpdateContext& context,
                                  const SkRRect& rrect,
                                  SkColor color,
-                                 float opacity,
-                                 float elevation,
+                                 SkAlpha opacity,
+                                 std::string label,
+                                 float z_translation,
                                  Layer* layer)
     : Entity(context),
-      opacity_node_(context.session()),
-      shape_node_(context.session()),
-      layer_(layer),
       rrect_(rrect),
-      paint_bounds_(SkRect::MakeEmpty()),
       color_(color),
-      opacity_(opacity) {
-  entity_node().SetTranslation(0.f, 0.f, -elevation);
-
-  entity_node().AddChild(shape_node_);
+      opacity_(opacity),
+      opacity_node_(context.session()),
+      paint_bounds_(SkRect::MakeEmpty()),
+      layer_(layer) {
+  entity_node().SetLabel(label);
+  entity_node().SetTranslation(0.f, 0.f, z_translation);
   entity_node().AddChild(opacity_node_);
-  opacity_node_.SetOpacity(opacity_);
+  // Scenic currently lacks an API to enable rendering of alpha channel; alpha
+  // channels are only rendered if there is a OpacityNode higher in the tree
+  // with opacity != 1. For now, clamp to a infinitesimally smaller value than
+  // 1, which does not cause visual problems in practice.
+  opacity_node_.SetOpacity(std::min(kOneMinusEpsilon, opacity_ / 255.0f));
 }
 
 SceneUpdateContext::Frame::~Frame() {
-  context().CreateFrame(std::move(entity_node()), std::move(shape_node_),
-                        rrect_, color_, opacity_, paint_bounds_,
-                        std::move(paint_layers_), layer_);
+  // We don't need a shape if the frame is zero size.
+  if (rrect_.isEmpty())
+    return;
+
+  // isEmpty should account for this, but we are adding these experimental
+  // checks to validate if this is the root cause for b/144933519.
+  if (std::isnan(rrect_.width()) || std::isnan(rrect_.height())) {
+    FML_LOG(ERROR) << "Invalid RoundedRectangle";
+    return;
+  }
+
+  // Add a part which represents the frame's geometry for clipping purposes
+  context().CreateFrame(std::move(entity_node()), rrect_, color_, opacity_,
+                        paint_bounds_, std::move(paint_layers_), layer_);
 }
 
 void SceneUpdateContext::Frame::AddPaintLayer(Layer* layer) {
   FML_DCHECK(layer->needs_painting());
   paint_layers_.push_back(layer);
   paint_bounds_.join(layer->paint_bounds());
+}
+
+SceneUpdateContext::Clip::Clip(SceneUpdateContext& context,
+                               const SkRect& shape_bounds)
+    : Entity(context) {
+  entity_node().SetLabel("flutter::Clip");
+  SetEntityNodeClipPlanes(entity_node(), shape_bounds);
 }
 
 }  // namespace flutter

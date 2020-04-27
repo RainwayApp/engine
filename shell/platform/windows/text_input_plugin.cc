@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include "flutter/shell/platform/common/cpp/client_wrapper/include/flutter/json_method_codec.h"
+#include "flutter/shell/platform/common/cpp/json_method_codec.h"
 
 static constexpr char kSetEditingStateMethod[] = "TextInput.setEditingState";
 static constexpr char kClearClientMethod[] = "TextInput.clearClient";
@@ -36,12 +36,12 @@ static constexpr char kInternalConsistencyError[] =
 
 namespace flutter {
 
-void TextInputPlugin::CharHook(Win32FlutterWindow* window,
-                               char32_t code_point) {
+void TextInputPlugin::TextHook(Win32FlutterWindow* window,
+                               const std::u16string& text) {
   if (active_model_ == nullptr) {
     return;
   }
-  active_model_->AddCharacter(code_point);
+  active_model_->AddText(text);
   SendStateUpdate(*active_model_);
 }
 
@@ -49,7 +49,7 @@ void TextInputPlugin::KeyboardHook(Win32FlutterWindow* window,
                                    int key,
                                    int scancode,
                                    int action,
-                                   int mods) {
+                                   char32_t character) {
   if (active_model_ == nullptr) {
     return;
   }
@@ -183,7 +183,7 @@ void TextInputPlugin::SendStateUpdate(const TextInputModel& model) {
 
 void TextInputPlugin::EnterPressed(TextInputModel* model) {
   if (model->input_type() == kMultilineInputType) {
-    model->AddCharacter('\n');
+    model->AddText(std::u16string({u'\n'}));
     SendStateUpdate(*model);
   }
   auto args = std::make_unique<rapidjson::Document>(rapidjson::kArrayType);
