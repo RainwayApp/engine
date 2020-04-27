@@ -180,6 +180,7 @@ using namespace flutter;
         postNotificationName:FlutterViewControllerHideHomeIndicator
                       object:nil];
   }
+#endif
 }
 
 - (void)restoreSystemChromeSystemUIOverlays {
