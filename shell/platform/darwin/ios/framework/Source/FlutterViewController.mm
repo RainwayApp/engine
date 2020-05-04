@@ -591,25 +591,25 @@ static flutter::PointerData::Change PointerDataChangeFromUITouchPhase(UITouchPha
       return flutter::PointerData::Change::kUp;
     case UITouchPhaseCancelled:
       return flutter::PointerData::Change::kCancel;
+    default:
+      return flutter::PointerData::Change::kCancel;
   }
-
-  return flutter::PointerData::Change::kCancel;
 }
 
 static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) {
-  if (@available(iOS 9, *)) {
+  if (@available(iOS 9, tvOS 9, *)) {
     switch (touch.type) {
       case UITouchTypeDirect:
       case UITouchTypeIndirect:
         return flutter::PointerData::DeviceKind::kTouch;
       case UITouchTypeStylus:
         return flutter::PointerData::DeviceKind::kStylus;
+      default:
+        return flutter::PointerData::DeviceKind::kTouch;
     }
   } else {
     return flutter::PointerData::DeviceKind::kTouch;
   }
-
-  return flutter::PointerData::DeviceKind::kTouch;
 }
 
 // Dispatches the UITouches to the engine. Usually, the type of change of the touch is determined
@@ -777,7 +777,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 #else
   _viewportMetrics.device_pixel_ratio = scale;
 #endif
-  
+
   // (lynn) But we shan't lie about the scale when reporting the physical screen size.
   // Otherwise everything will be drawn on a scaled-up canvas that doesn't fit on the screen.
   _viewportMetrics.physical_width = viewSize.width * scale;
