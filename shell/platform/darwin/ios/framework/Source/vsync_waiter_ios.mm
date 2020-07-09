@@ -91,7 +91,7 @@ float VsyncWaiterIOS::GetDisplayRefreshRate() const {
 }
 
 - (float)displayRefreshRate {
-  if (@available(iOS 10.3, *)) {
+  if (@available(iOS 10.3, tvOS 10.3, *)) {
     auto preferredFPS = display_link_.get().preferredFramesPerSecond;  // iOS 10.0
 
     // From Docs:

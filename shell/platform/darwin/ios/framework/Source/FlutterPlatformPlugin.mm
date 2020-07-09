@@ -13,7 +13,9 @@
 
 namespace {
 
+#if !TARGET_OS_TV
 constexpr char kTextPlainFormat[] = "text/plain";
+#endif
 const UInt32 kKeyPressClickSoundId = 1306;
 
 }  // namespaces
@@ -102,6 +104,9 @@ using namespace flutter;
 }
 
 - (void)vibrateHapticFeedback:(NSString*)feedbackType {
+#if TARGET_OS_TV
+  AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
+#else
   if (!feedbackType) {
     AudioServicesPlaySystemSound(kSystemSoundID_Vibrate);
     return;
@@ -121,9 +126,11 @@ using namespace flutter;
       [[[[UISelectionFeedbackGenerator alloc] init] autorelease] selectionChanged];
     }
   }
+#endif
 }
 
 - (void)setSystemChromePreferredOrientations:(NSArray*)orientations {
+#if !TARGET_OS_TV
   UIInterfaceOrientationMask mask = 0;
 
   if (orientations.count == 0) {
@@ -147,6 +154,7 @@ using namespace flutter;
       postNotificationName:@(kOrientationUpdateNotificationName)
                     object:nil
                   userInfo:@{@(kOrientationUpdateNotificationKey) : @(mask)}];
+#endif
 }
 
 - (void)setSystemChromeApplicationSwitcherDescription:(NSDictionary*)object {
@@ -160,6 +168,7 @@ using namespace flutter;
   // We opt out of view controller based status bar visibility since we want
   // to be able to modify this on the fly. The key used is
   // UIViewControllerBasedStatusBarAppearance
+#if !TARGET_OS_TV
   [UIApplication sharedApplication].statusBarHidden =
       ![overlays containsObject:@"SystemUiOverlay.top"];
   if ([overlays containsObject:@"SystemUiOverlay.bottom"]) {
@@ -172,12 +181,14 @@ using namespace flutter;
                       object:nil];
   }
 }
+#endif
 
 - (void)restoreSystemChromeSystemUIOverlays {
   // Nothing to do on iOS.
 }
 
 - (void)setSystemChromeSystemUIOverlayStyle:(NSDictionary*)message {
+#if !TARGET_OS_TV
   NSString* brightness = message[@"statusBarBrightness"];
   if (brightness == (id)[NSNull null])
     return;
@@ -210,6 +221,7 @@ using namespace flutter;
     // in favor of delegating to the view controller
     [[UIApplication sharedApplication] setStatusBarStyle:statusBarStyle];
   }
+#endif
 }
 
 - (void)popSystemNavigator:(BOOL)isAnimated {
@@ -230,6 +242,9 @@ using namespace flutter;
 }
 
 - (NSDictionary*)getClipboardData:(NSString*)format {
+#if TARGET_OS_TV
+  return nil;
+#else
   UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
   if (!format || [format isEqualToString:@(kTextPlainFormat)]) {
     NSString* stringInPasteboard = pasteboard.string;
@@ -237,15 +252,18 @@ using namespace flutter;
     return stringInPasteboard == nil ? nil : @{@"text" : stringInPasteboard};
   }
   return nil;
+#endif
 }
 
 - (void)setClipboardData:(NSDictionary*)data {
+#if !TARGET_OS_TV
   UIPasteboard* pasteboard = [UIPasteboard generalPasteboard];
   if (data[@"text"]) {
     pasteboard.string = data[@"text"];
   } else {
     pasteboard.string = @"null";
   }
+#endif
 }
 
 @end

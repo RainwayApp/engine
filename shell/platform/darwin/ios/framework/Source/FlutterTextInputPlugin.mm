@@ -68,7 +68,7 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
   if ([inputType isEqualToString:@"TextInputAction.next"])
     return UIReturnKeyNext;
 
-  if (@available(iOS 9.0, *))
+  if (@available(iOS 9.0, tvOS 9.0, *))
     if ([inputType isEqualToString:@"TextInputAction.continueAction"])
       return UIReturnKeyContinue;
 
@@ -256,8 +256,30 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
 
 @end
 
-@interface FlutterTextInputView ()
+@interface FlutterTextInputView : UIView <UITextInput>
 @property(nonatomic, copy) NSString* autofillId;
+// UITextInput
+@property(nonatomic, readonly) NSMutableString* text;
+@property(nonatomic, readonly) NSMutableString* markedText;
+@property(readwrite, copy) UITextRange* selectedTextRange;
+@property(nonatomic, strong) UITextRange* markedTextRange;
+@property(nonatomic, copy) NSDictionary* markedTextStyle;
+@property(nonatomic, assign) id<UITextInputDelegate> inputDelegate;
+
+// UITextInputTraits
+@property(nonatomic) UITextAutocapitalizationType autocapitalizationType;
+@property(nonatomic) UITextAutocorrectionType autocorrectionType;
+@property(nonatomic) UITextSpellCheckingType spellCheckingType;
+@property(nonatomic) BOOL enablesReturnKeyAutomatically;
+@property(nonatomic) UIKeyboardAppearance keyboardAppearance;
+@property(nonatomic) UIKeyboardType keyboardType;
+@property(nonatomic) UIReturnKeyType returnKeyType;
+@property(nonatomic, getter=isSecureTextEntry) BOOL secureTextEntry;
+@property(nonatomic) UITextSmartQuotesType smartQuotesType API_AVAILABLE(ios(11.0), tvos(11.0));
+@property(nonatomic) UITextSmartDashesType smartDashesType API_AVAILABLE(ios(11.0), tvos(11.0));
+
+@property(nonatomic, assign) id<FlutterTextInputDelegate> textInputDelegate;
+
 @end
 
 @implementation FlutterTextInputView {
@@ -289,7 +311,7 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
     _keyboardType = UIKeyboardTypeDefault;
     _returnKeyType = UIReturnKeyDone;
     _secureTextEntry = NO;
-    if (@available(iOS 11.0, *)) {
+    if (@available(iOS 11.0, tvOS 11.0, *)) {
       _smartQuotesType = UITextSmartQuotesTypeYes;
       _smartDashesType = UITextSmartDashesTypeYes;
     }
@@ -934,7 +956,7 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
   inputView.returnKeyType = ToUIReturnKeyType(configuration[@"inputAction"]);
   inputView.autocapitalizationType = ToUITextAutoCapitalizationType(configuration);
 
-  if (@available(iOS 11.0, *)) {
+  if (@available(iOS 11.0, tvOS 11.0, *)) {
     NSString* smartDashesType = configuration[@"smartDashesType"];
     // This index comes from the SmartDashesType enum in the framework.
     bool smartDashesIsDisabled = smartDashesType && [smartDashesType isEqualToString:@"0"];

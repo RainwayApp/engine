@@ -732,7 +732,9 @@ void FlutterPlatformViewsController::DisposeViews() {
         (FlutterPlatformViewGestureRecognizersBlockingPolicy)blockingPolicy {
   self = [super initWithFrame:embeddedView.frame];
   if (self) {
+#if !TARGET_OS_TV
     self.multipleTouchEnabled = YES;
+#endif
     embeddedView.autoresizingMask =
         (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
 

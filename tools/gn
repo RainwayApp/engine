@@ -68,6 +68,9 @@ def to_gn_args(args):
         elif args.target_os == 'ios':
             if args.runtime_mode != 'debug':
                 raise Exception('iOS simulator only supports the debug runtime mode')
+        elif args.target_os == 'tvos':
+            if args.runtime_mode != 'debug':
+                raise Exception('tvOS simulator only supports the debug runtime mode')
 
     if args.target_os != 'android' and args.enable_vulkan:
       raise Exception('--enable-vulkan is only supported on Android')
@@ -76,9 +79,15 @@ def to_gn_args(args):
 
     gn_args = {}
 
+    if args.bitcode is None:
+      args.bitcode = True if args.target_os == 'tvos' else False
+
+    if args.target_os == 'tvos' and not args.bitcode:
+      raise Exception('Bitcode must be enabled on tvOS')
+
     if args.bitcode:
-      if args.target_os != 'ios':
-        raise Exception('Bitcode is only supported for iOS')
+      if args.target_os not in ('ios', 'tvos'):
+        raise Exception('Bitcode is only supported for iOS and tvOS')
       if runtime_mode != 'release':
         gn_args['bitcode_marker'] = True
 
@@ -133,6 +142,9 @@ def to_gn_args(args):
     elif args.target_os == 'ios':
         gn_args['target_os'] = 'ios'
         gn_args['use_ios_simulator'] = args.simulator
+    elif args.target_os == 'tvos':
+        gn_args['target_os'] = 'tvos'
+        gn_args['use_tvos_simulator'] = args.simulator
     elif args.target_os is not None:
         gn_args['target_os'] = args.target_os
 
@@ -159,6 +171,11 @@ def to_gn_args(args):
             gn_args['target_cpu'] = 'x64'
         else:
             gn_args['target_cpu'] = args.ios_cpu
+    elif args.target_os == 'tvos':
+        if args.simulator:
+            gn_args['target_cpu'] = 'x64'
+        else:
+            gn_args['target_cpu'] = args.tvos_cpu
     elif args.target_os == 'linux':
       gn_args['target_cpu'] = args.linux_cpu
     elif args.target_os == 'fuchsia':
@@ -303,6 +320,8 @@ def parse_args(args):
   parser.add_argument('--ios', dest='target_os', action='store_const', const='ios')
   parser.add_argument('--tvos', dest='target_os', action='store_const', const='tvos')
   parser.add_argument('--ios-cpu', type=str, choices=['arm', 'arm64'], default='arm64')
+  parser.add_argument('--tvos', dest='target_os', action='store_const', const='tvos')
+  parser.add_argument('--tvos-cpu', type=str, choices=['arm', 'arm64'], default='arm64')
   parser.add_argument('--simulator', action='store_true', default=False)
   parser.add_argument('--fuchsia', dest='target_os', action='store_const', const='fuchsia')
   parser.add_argument('--linux-cpu', type=str, choices=['x64', 'x86', 'arm64', 'arm'])
@@ -353,7 +372,7 @@ def parse_args(args):
   parser.add_argument('--no-build-glfw-shell', dest='build_glfw_shell', action='store_const', const=False,
                       help='Do not build the GLFW shell on platforms where it is built by default.')
 
-  parser.add_argument('--bitcode', default=False, action='store_true',
+  parser.add_argument('--bitcode', default=None, action='store_true',
                       help='Enable bitcode for iOS targets. On debug runtime modes, this will be a marker only.')
 
   parser.add_argument('--stripped', default=True, action='store_true',

@@ -78,6 +78,8 @@ FLUTTER_EXPORT
                         nibName:(nullable NSString*)nibName
                          bundle:(nullable NSBundle*)nibBundle NS_DESIGNATED_INITIALIZER;
 
+- (void)handleStatusBarTouches:(UIEvent*)event API_UNAVAILABLE(tvos);
+
 /**
  * Registers a callback that will be invoked when the Flutter view has been rendered.
  * The callback will be fired only once.
