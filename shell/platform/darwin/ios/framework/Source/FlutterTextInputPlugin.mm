@@ -74,7 +74,7 @@ static UIReturnKeyType ToUIReturnKeyType(NSString* inputType) {
   if ([inputType isEqualToString:@"TextInputAction.next"])
     return UIReturnKeyNext;
 
-  if (@available(iOS 9.0, *))
+  if (@available(iOS 9.0, tvOS 9.0, *))
     if ([inputType isEqualToString:@"TextInputAction.continueAction"])
       return UIReturnKeyContinue;
 
@@ -302,7 +302,7 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
     _keyboardType = UIKeyboardTypeDefault;
     _returnKeyType = UIReturnKeyDone;
     _secureTextEntry = NO;
-    if (@available(iOS 11.0, *)) {
+    if (@available(iOS 11.0, tvOS 11.0, *)) {
       _smartQuotesType = UITextSmartQuotesTypeYes;
       _smartDashesType = UITextSmartDashesTypeYes;
     }
@@ -969,7 +969,7 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
   inputView.returnKeyType = ToUIReturnKeyType(configuration[@"inputAction"]);
   inputView.autocapitalizationType = ToUITextAutoCapitalizationType(configuration);
 
-  if (@available(iOS 11.0, *)) {
+  if (@available(iOS 11.0, tvOS 11.0, *)) {
     NSString* smartDashesType = configuration[@"smartDashesType"];
     // This index comes from the SmartDashesType enum in the framework.
     bool smartDashesIsDisabled = smartDashesType && [smartDashesType isEqualToString:@"0"];

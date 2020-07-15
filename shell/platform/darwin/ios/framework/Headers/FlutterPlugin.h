@@ -75,7 +75,7 @@ NS_ASSUME_NONNULL_BEGIN
     didRegisterUserNotificationSettings:(UIUserNotificationSettings*)notificationSettings
     API_DEPRECATED(
         "See -[UIApplicationDelegate application:didRegisterUserNotificationSettings:] deprecation",
-        ios(8.0, 10.0));
+        ios(8.0, 10.0)) API_UNAVAILABLE(tvos);
 
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.
@@ -99,7 +99,7 @@ NS_ASSUME_NONNULL_BEGIN
     didReceiveLocalNotification:(UILocalNotification*)notification
     API_DEPRECATED(
         "See -[UIApplicationDelegate application:didReceiveLocalNotification:] deprecation",
-        ios(4.0, 10.0));
+        ios(4.0, 10.0)) API_UNAVAILABLE(tvos);
 
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.
@@ -135,7 +135,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)application:(UIApplication*)application
     performActionForShortcutItem:(UIApplicationShortcutItem*)shortcutItem
                completionHandler:(void (^)(BOOL succeeded))completionHandler
-    API_AVAILABLE(ios(9.0));
+    API_AVAILABLE(ios(9.0)) API_UNAVAILABLE(tvos);
 
 /**
  * Called if this has been registered for `UIApplicationDelegate` callbacks.

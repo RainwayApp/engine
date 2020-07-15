@@ -66,7 +66,9 @@ typedef enum UIAccessibilityContrast : NSInteger {
   fml::scoped_nsobject<UIView> _splashScreenView;
   fml::ScopedBlock<void (^)(void)> _flutterViewRenderedCallback;
   UIInterfaceOrientationMask _orientationPreferences;
+#if !TARGET_OS_TV
   UIStatusBarStyle _statusBarStyle;
+#endif
   flutter::ViewportMetrics _viewportMetrics;
   BOOL _initialized;
   BOOL _viewOpaque;
@@ -176,8 +178,10 @@ typedef enum UIAccessibilityContrast : NSInteger {
 
   _initialized = YES;
 
+#if !TARGET_OS_TV
   _orientationPreferences = UIInterfaceOrientationMaskAll;
   _statusBarStyle = UIStatusBarStyleDefault;
+#endif
 
   [self setupNotificationCenterObservers];
 }
@@ -222,6 +226,7 @@ typedef enum UIAccessibilityContrast : NSInteger {
                  name:UIApplicationWillEnterForegroundNotification
                object:nil];
 
+#if !TARGET_OS_TV
   [center addObserver:self
              selector:@selector(keyboardWillChangeFrame:)
                  name:UIKeyboardWillChangeFrameNotification
@@ -231,6 +236,7 @@ typedef enum UIAccessibilityContrast : NSInteger {
              selector:@selector(keyboardWillBeHidden:)
                  name:UIKeyboardWillHideNotification
                object:nil];
+#endif
 
   [center addObserver:self
              selector:@selector(onAccessibilityStatusChanged:)
@@ -299,7 +305,9 @@ typedef enum UIAccessibilityContrast : NSInteger {
 
 - (void)loadView {
   self.view = _flutterView.get();
+#if !TARGET_OS_TV
   self.view.multipleTouchEnabled = YES;
+#endif
   self.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
   [self installSplashScreenViewIfNecessary];
@@ -671,14 +679,12 @@ static flutter::PointerData::Change PointerDataChangeFromUITouchPhase(UITouchPha
     default:
       // TODO(53695): Handle the `UITouchPhaseRegion`... enum values.
       FML_DLOG(INFO) << "Unhandled touch phase: " << phase;
-      break;
+      return flutter::PointerData::Change::kCancel;
   }
-
-  return flutter::PointerData::Change::kCancel;
 }
 
 static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) {
-  if (@available(iOS 9, *)) {
+  if (@available(iOS 9, tvOS 9, *)) {
     switch (touch.type) {
       case UITouchTypeDirect:
       case UITouchTypeIndirect:
@@ -688,11 +694,9 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
       default:
         // TODO(53696): Handle the UITouchTypeIndirectPointer enum value.
         FML_DLOG(INFO) << "Unhandled touch type: " << touch.type;
-        break;
+        return flutter::PointerData::DeviceKind::kTouch;
     }
   }
-
-  return flutter::PointerData::DeviceKind::kTouch;
 }
 
 // Dispatches the UITouches to the engine. Usually, the type of change of the touch is determined
@@ -770,7 +774,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
     pointer_data.radius_max = touch.majorRadius + touch.majorRadiusTolerance;
 
     // These properties were introduced in iOS 9.1
-    if (@available(iOS 9.1, *)) {
+    if (@available(iOS 9.1, tvOS 9.1, *)) {
       // iOS Documentation: altitudeAngle
       // A value of 0 radians indicates that the stylus is parallel to the surface. The value of
       // this property is Pi/2 when the stylus is perpendicular to the surface.
@@ -836,12 +840,16 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 }
 
 - (CGFloat)statusBarPadding {
+#if TARGET_OS_TV
+  return 0.0;
+#else
   UIScreen* screen = self.view.window.screen;
   CGRect statusFrame = [UIApplication sharedApplication].statusBarFrame;
   CGRect viewFrame = [self.view convertRect:self.view.bounds
                           toCoordinateSpace:screen.coordinateSpace];
   CGRect intersection = CGRectIntersection(statusFrame, viewFrame);
   return CGRectIsNull(intersection) ? 0.0 : intersection.size.height;
+#endif
 }
 
 - (void)viewDidLayoutSubviews {
@@ -854,7 +862,15 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
   // First time since creation that the dimensions of its view is known.
   bool firstViewBoundsUpdate = !_viewportMetrics.physical_width;
+#if TARGET_OS_TV
+  // (lynn) We lie about the device_pixel_ratio to trick Flutter into rendering everything bigger.
+  _viewportMetrics.device_pixel_ratio = scale * 1.5;
+#else
   _viewportMetrics.device_pixel_ratio = scale;
+#endif
+
+  // (lynn) But we shan't lie about the scale when reporting the physical screen size.
+  // Otherwise everything will be drawn on a scaled-up canvas that doesn't fit on the screen.
   _viewportMetrics.physical_width = viewSize.width * scale;
   _viewportMetrics.physical_height = viewSize.height * scale;
 
@@ -898,7 +914,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // Viewport padding represents the iOS safe area insets.
 - (void)updateViewportPadding {
   CGFloat scale = [UIScreen mainScreen].scale;
-  if (@available(iOS 11, *)) {
+  if (@available(iOS 11, tvOS 11, *)) {
     _viewportMetrics.physical_padding_top = self.view.safeAreaInsets.top * scale;
     _viewportMetrics.physical_padding_left = self.view.safeAreaInsets.left * scale;
     _viewportMetrics.physical_padding_right = self.view.safeAreaInsets.right * scale;
@@ -910,7 +926,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
 #pragma mark - Keyboard events
 
-- (void)keyboardWillChangeFrame:(NSNotification*)notification {
+- (void)keyboardWillChangeFrame:(NSNotification*)notification API_UNAVAILABLE(tvos) {
   NSDictionary* info = [notification userInfo];
 
   if (@available(iOS 9, *)) {
@@ -948,7 +964,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 
 #pragma mark - Orientation updates
 
-- (void)onOrientationPreferencesUpdated:(NSNotification*)notification {
+- (void)onOrientationPreferencesUpdated:(NSNotification*)notification API_UNAVAILABLE(tvos) {
   // Notifications may not be on the iOS UI thread
   dispatch_async(dispatch_get_main_queue(), ^{
     NSDictionary* info = notification.userInfo;
@@ -962,7 +978,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
   });
 }
 
-- (void)performOrientationUpdate:(UIInterfaceOrientationMask)new_preferences {
+- (void)performOrientationUpdate:(UIInterfaceOrientationMask)new_preferences API_UNAVAILABLE(tvos) {
   if (new_preferences != _orientationPreferences) {
     _orientationPreferences = new_preferences;
     [UIViewController attemptRotationToDeviceOrientation];
@@ -1137,7 +1153,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // is understood by the Flutter framework. See the settings system channel for more
 // information.
 - (NSString*)brightnessMode {
-  if (@available(iOS 13, *)) {
+  if (@available(iOS 13, tvOS 13, *)) {
     UIUserInterfaceStyle style = self.traitCollection.userInterfaceStyle;
 
     if (style == UIUserInterfaceStyleDark) {
@@ -1154,7 +1170,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 // understood by the Flutter framework. See the settings system channel for more
 // information.
 - (NSString*)contrastMode {
-  if (@available(iOS 13, *)) {
+  if (@available(iOS 13, tvOS 13, *)) {
     UIAccessibilityContrast contrast = self.traitCollection.accessibilityContrast;
 
     if (contrast == UIAccessibilityContrastHigh) {
@@ -1167,6 +1183,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
   }
 }
 
+#if !TARGET_OS_TV
 #pragma mark - Status bar style
 
 - (UIStatusBarStyle)preferredStatusBarStyle {
@@ -1192,6 +1209,7 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
     }
   });
 }
+#endif
 
 #pragma mark - Platform views
 

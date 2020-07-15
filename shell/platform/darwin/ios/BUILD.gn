@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-assert(is_ios)
+assert(is_ios || is_tvos)
 
 import("//build/config/ios/ios_sdk.gni")
 import("//build/toolchain/clang.gni")

@@ -71,7 +71,7 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 - (void)application:(UIApplication*)application
-    didRegisterUserNotificationSettings:(UIUserNotificationSettings*)notificationSettings {
+    didRegisterUserNotificationSettings:(UIUserNotificationSettings*)notificationSettings API_UNAVAILABLE(tvos) {
   [_lifeCycleDelegate application:application
       didRegisterUserNotificationSettings:notificationSettings];
 }
@@ -86,7 +86,7 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 - (void)application:(UIApplication*)application
-    didReceiveLocalNotification:(UILocalNotification*)notification {
+    didReceiveLocalNotification:(UILocalNotification*)notification API_UNAVAILABLE(tvos) {
   [_lifeCycleDelegate application:application didReceiveLocalNotification:notification];
 }
 #pragma GCC diagnostic pop
@@ -95,8 +95,8 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
        willPresentNotification:(UNNotification*)notification
          withCompletionHandler:
              (void (^)(UNNotificationPresentationOptions options))completionHandler
-    NS_AVAILABLE_IOS(10_0) {
-  if (@available(iOS 10.0, *)) {
+    NS_AVAILABLE_IOS(10_0) __TVOS_AVAILABLE(10_0) {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if ([_lifeCycleDelegate respondsToSelector:_cmd]) {
       [_lifeCycleDelegate userNotificationCenter:center
                          willPresentNotification:notification
@@ -110,8 +110,8 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
  */
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
     didReceiveNotificationResponse:(UNNotificationResponse*)response
-             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) {
-  if (@available(iOS 10.0, *)) {
+             withCompletionHandler:(void (^)(void))completionHandler NS_AVAILABLE_IOS(10_0) __TVOS_UNAVAILABLE {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if ([_lifeCycleDelegate respondsToSelector:_cmd]) {
       [_lifeCycleDelegate userNotificationCenter:center
                   didReceiveNotificationResponse:response
@@ -142,7 +142,7 @@ static NSString* kBackgroundFetchCapatibility = @"fetch";
 
 - (void)application:(UIApplication*)application
     performActionForShortcutItem:(UIApplicationShortcutItem*)shortcutItem
-               completionHandler:(void (^)(BOOL succeeded))completionHandler NS_AVAILABLE_IOS(9_0) {
+               completionHandler:(void (^)(BOOL succeeded))completionHandler NS_AVAILABLE_IOS(9_0) API_UNAVAILABLE(tvos) {
   [_lifeCycleDelegate application:application
       performActionForShortcutItem:shortcutItem
                  completionHandler:completionHandler];
