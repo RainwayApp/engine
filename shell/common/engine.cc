@@ -90,6 +90,11 @@ fml::WeakPtr<Engine> Engine::GetWeakPtr() const {
   return weak_factory_.GetWeakPtr();
 }
 
+void Engine::SetupDefaultFontManager() {
+  TRACE_EVENT0("flutter", "Engine::SetupDefaultFontManager");
+  font_collection_.SetupDefaultFontManager();
+}
+
 bool Engine::UpdateAssetManager(
     std::shared_ptr<AssetManager> new_asset_manager) {
   if (asset_manager_ == new_asset_manager) {
@@ -359,29 +364,32 @@ bool Engine::HandleLocalizationPlatformMessage(PlatformMessage* message) {
     return false;
   auto root = document.GetObject();
   auto method = root.FindMember("method");
-  if (method == root.MemberEnd() || method->value != "setLocale")
+  if (method == root.MemberEnd())
     return false;
-
-  auto args = root.FindMember("args");
-  if (args == root.MemberEnd() || !args->value.IsArray())
-    return false;
-
   const size_t strings_per_locale = 4;
-  if (args->value.Size() % strings_per_locale != 0)
-    return false;
-  std::vector<std::string> locale_data;
-  for (size_t locale_index = 0; locale_index < args->value.Size();
-       locale_index += strings_per_locale) {
-    if (!args->value[locale_index].IsString() ||
-        !args->value[locale_index + 1].IsString())
+  if (method->value == "setLocale") {
+    // Decode and pass the list of locale data onwards to dart.
+    auto args = root.FindMember("args");
+    if (args == root.MemberEnd() || !args->value.IsArray())
       return false;
-    locale_data.push_back(args->value[locale_index].GetString());
-    locale_data.push_back(args->value[locale_index + 1].GetString());
-    locale_data.push_back(args->value[locale_index + 2].GetString());
-    locale_data.push_back(args->value[locale_index + 3].GetString());
-  }
 
-  return runtime_controller_->SetLocales(locale_data);
+    if (args->value.Size() % strings_per_locale != 0)
+      return false;
+    std::vector<std::string> locale_data;
+    for (size_t locale_index = 0; locale_index < args->value.Size();
+         locale_index += strings_per_locale) {
+      if (!args->value[locale_index].IsString() ||
+          !args->value[locale_index + 1].IsString())
+        return false;
+      locale_data.push_back(args->value[locale_index].GetString());
+      locale_data.push_back(args->value[locale_index + 1].GetString());
+      locale_data.push_back(args->value[locale_index + 2].GetString());
+      locale_data.push_back(args->value[locale_index + 3].GetString());
+    }
+
+    return runtime_controller_->SetLocales(locale_data);
+  }
+  return false;
 }
 
 void Engine::HandleSettingsPlatformMessage(PlatformMessage* message) {
@@ -464,6 +472,11 @@ void Engine::HandlePlatformMessage(fml::RefPtr<PlatformMessage> message) {
 void Engine::UpdateIsolateDescription(const std::string isolate_name,
                                       int64_t isolate_port) {
   delegate_.UpdateIsolateDescription(isolate_name, isolate_port);
+}
+
+std::unique_ptr<std::vector<std::string>> Engine::ComputePlatformResolvedLocale(
+    const std::vector<std::string>& supported_locale_data) {
+  return delegate_.ComputePlatformResolvedLocale(supported_locale_data);
 }
 
 void Engine::SetNeedsReportTimings(bool needs_reporting) {

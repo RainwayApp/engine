@@ -13,6 +13,7 @@
 #include "flutter/fml/concurrent_message_loop.h"
 #include "flutter/fml/macros.h"
 #include "flutter/fml/mapping.h"
+#include "flutter/fml/trace_event.h"
 #include "flutter/lib/ui/io_manager.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -21,6 +22,9 @@
 #include "third_party/skia/include/core/SkSize.h"
 
 namespace flutter {
+
+// Whether to allow for image upscaling when resizing an image.
+enum class ImageUpscalingMode { kAllowed, kNotAllowed };
 
 // An object that coordinates image decompression and texture upload across
 // multiple threads/components in the shell. This object must be created,
@@ -46,6 +50,7 @@ class ImageDecoder {
     std::optional<ImageInfo> decompressed_image_info;
     std::optional<uint32_t> target_width;
     std::optional<uint32_t> target_height;
+    ImageUpscalingMode image_upscaling = ImageUpscalingMode::kNotAllowed;
   };
 
   using ImageResult = std::function<void(SkiaGPUObject<SkImage>)>;
@@ -67,6 +72,12 @@ class ImageDecoder {
 
   FML_DISALLOW_COPY_AND_ASSIGN(ImageDecoder);
 };
+
+sk_sp<SkImage> ImageFromCompressedData(sk_sp<SkData> data,
+                                       std::optional<uint32_t> target_width,
+                                       std::optional<uint32_t> target_height,
+                                       ImageUpscalingMode image_upscaling,
+                                       const fml::tracing::TraceFlow& flow);
 
 }  // namespace flutter
 

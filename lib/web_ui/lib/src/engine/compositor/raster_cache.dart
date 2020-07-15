@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+
 part of engine;
 
 /// A cache of [Picture]s that have already been rasterized.
@@ -47,5 +48,5 @@ class RasterCacheResult {
   bool get isValid => false;
 
   /// Draws the rasterized picture into the [canvas].
-  void draw(SkCanvas canvas) {}
+  void draw(CkCanvas canvas) {}
 }

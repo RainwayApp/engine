@@ -7,9 +7,9 @@
 
 #include <Metal/Metal.h>
 
+#include "flutter/flow/surface.h"
 #include "flutter/fml/macros.h"
 #include "flutter/fml/platform/darwin/scoped_nsobject.h"
-#include "flutter/shell/common/surface.h"
 #include "flutter/shell/gpu/gpu_surface_delegate.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 
@@ -19,11 +19,12 @@ namespace flutter {
 
 class GPUSurfaceMetal : public Surface {
  public:
-  GPUSurfaceMetal(GPUSurfaceDelegate* delegate, fml::scoped_nsobject<CAMetalLayer> layer);
   GPUSurfaceMetal(GPUSurfaceDelegate* delegate,
-                  sk_sp<GrContext> gr_context,
-                  fml::scoped_nsobject<CAMetalLayer> layer);
+                  fml::scoped_nsobject<CAMetalLayer> layer,
+                  sk_sp<GrContext> context,
+                  fml::scoped_nsprotocol<id<MTLCommandQueue>> command_queue);
 
+  // |Surface|
   ~GPUSurfaceMetal() override;
 
  private:
@@ -49,7 +50,7 @@ class GPUSurfaceMetal : public Surface {
   flutter::ExternalViewEmbedder* GetExternalViewEmbedder() override;
 
   // |Surface|
-  bool MakeRenderContextCurrent() override;
+  std::unique_ptr<GLContextResult> MakeRenderContextCurrent() override;
 
   void ReleaseUnusedDrawableIfNecessary();
 

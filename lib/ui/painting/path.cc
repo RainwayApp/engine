@@ -8,6 +8,7 @@
 #include <math.h>
 
 #include "flutter/lib/ui/painting/matrix.h"
+#include "flutter/lib/ui/ui_dart_state.h"
 #include "third_party/tonic/converter/dart_converter.h"
 #include "third_party/tonic/dart_args.h"
 #include "third_party/tonic/dart_binding_macros.h"
@@ -20,7 +21,8 @@ namespace flutter {
 typedef CanvasPath Path;
 
 static void Path_constructor(Dart_NativeArguments args) {
-  DartCallConstructor(&CanvasPath::Create, args);
+  UIDartState::ThrowIfUIOperationsProhibited();
+  DartCallConstructor(&CanvasPath::CreateNew, args);
 }
 
 IMPLEMENT_WRAPPERTYPEINFO(ui, Path);
@@ -262,17 +264,16 @@ bool CanvasPath::contains(double x, double y) {
   return path_.contains(x, y);
 }
 
-fml::RefPtr<CanvasPath> CanvasPath::shift(double dx, double dy) {
-  fml::RefPtr<CanvasPath> path = CanvasPath::Create();
+void CanvasPath::shift(Dart_Handle path_handle, double dx, double dy) {
+  fml::RefPtr<CanvasPath> path = CanvasPath::Create(path_handle);
   path_.offset(dx, dy, &path->path_);
-  return path;
 }
 
-fml::RefPtr<CanvasPath> CanvasPath::transform(tonic::Float64List& matrix4) {
-  fml::RefPtr<CanvasPath> path = CanvasPath::Create();
+void CanvasPath::transform(Dart_Handle path_handle,
+                           tonic::Float64List& matrix4) {
+  fml::RefPtr<CanvasPath> path = CanvasPath::Create(path_handle);
   path_.transform(ToSkMatrix(matrix4), &path->path_);
   matrix4.Release();
-  return path;
 }
 
 tonic::Float32List CanvasPath::getBounds() {
@@ -289,12 +290,18 @@ bool CanvasPath::op(CanvasPath* path1, CanvasPath* path2, int operation) {
   return Op(path1->path(), path2->path(), (SkPathOp)operation, &path_);
 }
 
-fml::RefPtr<CanvasPath> CanvasPath::clone() {
-  fml::RefPtr<CanvasPath> path = CanvasPath::Create();
+void CanvasPath::clone(Dart_Handle path_handle) {
+  fml::RefPtr<CanvasPath> path = CanvasPath::Create(path_handle);
   // per Skia docs, this will create a fast copy
   // data is shared until the source path or dest path are mutated
   path->path_ = path_;
-  return path;
+}
+
+// This is doomed to be called too early, since Paths are mutable.
+// However, it can help for some of the clone/shift/transform type methods
+// where the resultant path will initially have a meaningful size.
+size_t CanvasPath::GetAllocationSize() const {
+  return sizeof(CanvasPath) + path_.approximateBytesUsed();
 }
 
 }  // namespace flutter

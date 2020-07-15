@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
@@ -91,6 +92,7 @@ struct Settings {
   bool enable_checked_mode = false;
   bool start_paused = false;
   bool trace_skia = false;
+  std::string trace_allowlist;
   bool trace_startup = false;
   bool trace_systrace = false;
   bool dump_skp_on_shader_compilation = false;
@@ -98,6 +100,10 @@ struct Settings {
   bool endless_trace_buffer = false;
   bool enable_dart_profiling = false;
   bool disable_dart_asserts = false;
+
+  // Used to signal the embedder whether HTTP connections are disabled.
+  bool disable_http = false;
+
   // Used as the script URI in debug messages. Does not affect how the Dart code
   // is executed.
   std::string advisory_script_uri = "main.dart";
@@ -121,6 +127,10 @@ struct Settings {
   // Determines whether an authentication code is required to communicate with
   // the VM service.
   bool disable_service_auth_codes = true;
+
+  // Determine whether the vmservice should fallback to automatic port selection
+  // after failing to bind to a specified port.
+  bool enable_service_port_fallback = false;
 
   // Font settings
   bool use_test_fonts = false;
@@ -187,7 +197,7 @@ struct Settings {
   // Window.getPersistentIsolateData callback. This is meant for information
   // that the isolate cannot request asynchronously (platform messages can be
   // used for that purpose). This data is held for the lifetime of the shell and
-  // is available on isolate restarts in the the shell instance. Due to this,
+  // is available on isolate restarts in the shell instance. Due to this,
   // the buffer must be as small as possible.
   std::shared_ptr<const fml::Mapping> persistent_isolate_data;
 
@@ -197,6 +207,20 @@ struct Settings {
   /// See also:
   /// https://github.com/dart-lang/sdk/blob/ca64509108b3e7219c50d6c52877c85ab6a35ff2/runtime/vm/flag_list.h#L150
   int64_t old_gen_heap_size = -1;
+
+  /// A timestamp representing when the engine started. The value is based
+  /// on the clock used by the Dart timeline APIs. This timestamp is used
+  /// to log a timeline event that tracks the latency of engine startup.
+  std::chrono::microseconds engine_start_timestamp = {};
+
+  /// Whether the application claims that it uses the android embedded view for
+  /// platform views.
+  ///
+  /// A `true` value will result the raster task runner always run on the
+  /// platform thread.
+  // TODO(cyanlaz): Remove this when dynamic thread merging is done.
+  // https://github.com/flutter/flutter/issues/59930
+  bool use_embedded_view = false;
 
   std::string ToString() const;
 };

@@ -5,27 +5,24 @@
 #define FML_USED_ON_EMBEDDER
 
 #include "flutter/shell/common/shell_test.h"
+#include "flutter/shell/common/shell_test_platform_view.h"
 
 #include "flutter/flow/layers/layer_tree.h"
 #include "flutter/flow/layers/transform_layer.h"
+#include "flutter/fml/build_config.h"
 #include "flutter/fml/make_copyable.h"
 #include "flutter/fml/mapping.h"
 #include "flutter/runtime/dart_vm.h"
 #include "flutter/shell/common/vsync_waiter_fallback.h"
-#include "flutter/shell/gpu/gpu_surface_gl.h"
 #include "flutter/testing/testing.h"
 
 namespace flutter {
 namespace testing {
 
 ShellTest::ShellTest()
-    : native_resolver_(std::make_shared<TestDartNativeResolver>()),
-      thread_host_("io.flutter.test." + GetCurrentTestName() + ".",
+    : thread_host_("io.flutter.test." + GetCurrentTestName() + ".",
                    ThreadHost::Type::Platform | ThreadHost::Type::IO |
-                       ThreadHost::Type::UI | ThreadHost::Type::GPU),
-      assets_dir_(fml::OpenDirectory(GetFixturesPath(),
-                                     false,
-                                     fml::FilePermission::kRead)) {}
+                       ThreadHost::Type::UI | ThreadHost::Type::GPU) {}
 
 void ShellTest::SendEnginePlatformMessage(
     Shell* shell,
@@ -40,46 +37,6 @@ void ShellTest::SendEnginePlatformMessage(
         latch.Signal();
       });
   latch.Wait();
-}
-
-void ShellTest::SetSnapshotsAndAssets(Settings& settings) {
-  if (!assets_dir_.is_valid()) {
-    return;
-  }
-
-  settings.assets_dir = assets_dir_.get();
-
-  // In JIT execution, all snapshots are present within the binary itself and
-  // don't need to be explicitly suppiled by the embedder.
-  if (DartVM::IsRunningPrecompiledCode()) {
-    settings.vm_snapshot_data = [this]() {
-      return fml::FileMapping::CreateReadOnly(assets_dir_, "vm_snapshot_data");
-    };
-
-    settings.isolate_snapshot_data = [this]() {
-      return fml::FileMapping::CreateReadOnly(assets_dir_,
-                                              "isolate_snapshot_data");
-    };
-
-    if (DartVM::IsRunningPrecompiledCode()) {
-      settings.vm_snapshot_instr = [this]() {
-        return fml::FileMapping::CreateReadExecute(assets_dir_,
-                                                   "vm_snapshot_instr");
-      };
-
-      settings.isolate_snapshot_instr = [this]() {
-        return fml::FileMapping::CreateReadExecute(assets_dir_,
-                                                   "isolate_snapshot_instr");
-      };
-    }
-  } else {
-    settings.application_kernels = [this]() {
-      std::vector<std::unique_ptr<const fml::Mapping>> kernel_mappings;
-      kernel_mappings.emplace_back(
-          fml::FileMapping::CreateReadOnly(assets_dir_, "kernel_blob.bin"));
-      return kernel_mappings;
-    };
-  }
 }
 
 void ShellTest::PlatformViewNotifyCreated(Shell* shell) {
@@ -219,6 +176,31 @@ bool ShellTest::GetNeedsReportTimings(Shell* shell) {
   return shell->needs_report_timings_;
 }
 
+void ShellTest::OnServiceProtocol(
+    Shell* shell,
+    ServiceProtocolEnum some_protocol,
+    fml::RefPtr<fml::TaskRunner> task_runner,
+    const ServiceProtocol::Handler::ServiceProtocolMap& params,
+    rapidjson::Document& response) {
+  std::promise<bool> finished;
+  fml::TaskRunner::RunNowOrPostTask(
+      task_runner, [shell, some_protocol, params, &response, &finished]() {
+        switch (some_protocol) {
+          case ServiceProtocolEnum::kGetSkSLs:
+            shell->OnServiceProtocolGetSkSLs(params, response);
+            break;
+          case ServiceProtocolEnum::kSetAssetBundlePath:
+            shell->OnServiceProtocolSetAssetBundlePath(params, response);
+            break;
+          case ServiceProtocolEnum::kRunInView:
+            shell->OnServiceProtocolRunInView(params, response);
+            break;
+        }
+        finished.set_value(true);
+      });
+  finished.get_future().wait();
+}
+
 std::shared_ptr<txt::FontCollection> ShellTest::GetFontCollection(
     Shell* shell) {
   return shell->weak_engine_->GetFontCollection().GetFontCollection();
@@ -236,6 +218,9 @@ Settings ShellTest::CreateSettingsForFixture() {
   settings.isolate_create_callback = [this]() {
     native_resolver_->SetNativeResolverForIsolate();
   };
+#if OS_FUCHSIA
+  settings.verbose_logging = true;
+#endif
   SetSnapshotsAndAssets(settings);
   return settings;
 }
@@ -244,10 +229,14 @@ TaskRunners ShellTest::GetTaskRunnersForFixture() {
   return {
       "test",
       thread_host_.platform_thread->GetTaskRunner(),  // platform
-      thread_host_.gpu_thread->GetTaskRunner(),       // gpu
+      thread_host_.raster_thread->GetTaskRunner(),    // raster
       thread_host_.ui_thread->GetTaskRunner(),        // ui
       thread_host_.io_thread->GetTaskRunner()         // io
   };
+}
+
+fml::TimePoint ShellTest::GetLatestFrameTargetTime(Shell* shell) const {
+  return shell->GetLatestFrameTargetTime();
 }
 
 std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
@@ -256,9 +245,12 @@ std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
                      simulate_vsync);
 }
 
-std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
-                                              TaskRunners task_runners,
-                                              bool simulate_vsync) {
+std::unique_ptr<Shell> ShellTest::CreateShell(
+    Settings settings,
+    TaskRunners task_runners,
+    bool simulate_vsync,
+    std::shared_ptr<ShellTestExternalViewEmbedder>
+        shell_test_external_view_embedder) {
   const auto vsync_clock = std::make_shared<ShellTestVsyncClock>();
   CreateVsyncWaiter create_vsync_waiter = [&]() {
     if (simulate_vsync) {
@@ -271,16 +263,19 @@ std::unique_ptr<Shell> ShellTest::CreateShell(Settings settings,
   };
   return Shell::Create(
       task_runners, settings,
-      [vsync_clock, &create_vsync_waiter](Shell& shell) {
-        return std::make_unique<ShellTestPlatformView>(
+      [vsync_clock, &create_vsync_waiter,
+       shell_test_external_view_embedder](Shell& shell) {
+        return ShellTestPlatformView::Create(
             shell, shell.GetTaskRunners(), vsync_clock,
-            std::move(create_vsync_waiter));
+            std::move(create_vsync_waiter),
+            ShellTestPlatformView::BackendType::kDefaultBackend,
+            shell_test_external_view_embedder);
       },
       [](Shell& shell) {
-        return std::make_unique<Rasterizer>(shell, shell.GetTaskRunners());
+        return std::make_unique<Rasterizer>(shell, shell.GetTaskRunners(),
+                                            shell.GetIsGpuDisabledSyncSwitch());
       });
 }
-
 void ShellTest::DestroyShell(std::unique_ptr<Shell> shell) {
   DestroyShell(std::move(shell), GetTaskRunnersForFixture());
 }
@@ -294,76 +289,6 @@ void ShellTest::DestroyShell(std::unique_ptr<Shell> shell,
                                       latch.Signal();
                                     });
   latch.Wait();
-}
-
-void ShellTest::AddNativeCallback(std::string name,
-                                  Dart_NativeFunction callback) {
-  native_resolver_->AddNativeCallback(std::move(name), callback);
-}
-
-ShellTestPlatformView::ShellTestPlatformView(
-    PlatformView::Delegate& delegate,
-    TaskRunners task_runners,
-    std::shared_ptr<ShellTestVsyncClock> vsync_clock,
-    CreateVsyncWaiter create_vsync_waiter)
-    : PlatformView(delegate, std::move(task_runners)),
-      gl_surface_(SkISize::Make(800, 600)),
-      create_vsync_waiter_(std::move(create_vsync_waiter)),
-      vsync_clock_(vsync_clock) {}
-
-ShellTestPlatformView::~ShellTestPlatformView() = default;
-
-std::unique_ptr<VsyncWaiter> ShellTestPlatformView::CreateVSyncWaiter() {
-  return create_vsync_waiter_();
-}
-
-void ShellTestPlatformView::SimulateVSync() {
-  vsync_clock_->SimulateVSync();
-}
-
-// |PlatformView|
-std::unique_ptr<Surface> ShellTestPlatformView::CreateRenderingSurface() {
-  return std::make_unique<GPUSurfaceGL>(this, true);
-}
-
-// |PlatformView|
-PointerDataDispatcherMaker ShellTestPlatformView::GetDispatcherMaker() {
-  return [](DefaultPointerDataDispatcher::Delegate& delegate) {
-    return std::make_unique<SmoothPointerDataDispatcher>(delegate);
-  };
-}
-
-// |GPUSurfaceGLDelegate|
-bool ShellTestPlatformView::GLContextMakeCurrent() {
-  return gl_surface_.MakeCurrent();
-}
-
-// |GPUSurfaceGLDelegate|
-bool ShellTestPlatformView::GLContextClearCurrent() {
-  return gl_surface_.ClearCurrent();
-}
-
-// |GPUSurfaceGLDelegate|
-bool ShellTestPlatformView::GLContextPresent() {
-  return gl_surface_.Present();
-}
-
-// |GPUSurfaceGLDelegate|
-intptr_t ShellTestPlatformView::GLContextFBO() const {
-  return gl_surface_.GetFramebuffer();
-}
-
-// |GPUSurfaceGLDelegate|
-GPUSurfaceGLDelegate::GLProcResolver ShellTestPlatformView::GetGLProcResolver()
-    const {
-  return [surface = &gl_surface_](const char* name) -> void* {
-    return surface->GetProcAddress(name);
-  };
-}
-
-// |GPUSurfaceGLDelegate|
-ExternalViewEmbedder* ShellTestPlatformView::GetExternalViewEmbedder() {
-  return nullptr;
 }
 
 }  // namespace testing

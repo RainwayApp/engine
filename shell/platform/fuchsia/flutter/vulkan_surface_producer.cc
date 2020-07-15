@@ -16,6 +16,7 @@
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/vk/GrVkBackendContext.h"
+#include "third_party/skia/include/gpu/vk/GrVkExtensions.h"
 #include "third_party/skia/include/gpu/vk/GrVkTypes.h"
 
 namespace flutter_runner {
@@ -32,7 +33,7 @@ constexpr int kGrCacheMaxCount = 8192;
 //     "SkiaCacheBytes" field in the ("flutter", "SurfacePool") trace counter
 //     (compare it to the bytes value here)
 // then you should consider increasing the size of the GPU resource cache.
-constexpr size_t kGrCacheMaxByteSize = 16 * (1 << 20);
+constexpr size_t kGrCacheMaxByteSize = 1024 * 600 * 12 * 4;
 
 }  // namespace
 
@@ -63,9 +64,13 @@ bool VulkanSurfaceProducer::Initialize(scenic::Session* scenic_session) {
   std::vector<std::string> extensions = {
       VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME,
   };
+
+  // On Fuchsia, the validation layers need to be packaged as part of the
+  // flutter_runner in order to work. As a result, we can use the presence
+  // of the layers to mean that we want the layers enabled.
   application_ = std::make_unique<vulkan::VulkanApplication>(
       *vk_, "FlutterRunner", std::move(extensions), VK_MAKE_VERSION(1, 0, 0),
-      VK_MAKE_VERSION(1, 1, 0));
+      VK_MAKE_VERSION(1, 1, 0), true /* enable_validation_layers */);
 
   if (!application_->IsValid() || !vk_->AreInstanceProcsSetup()) {
     // Make certain the application instance was created and it setup the
@@ -118,11 +123,27 @@ bool VulkanSurfaceProducer::Initialize(scenic::Session* scenic_session) {
   backend_context.fGraphicsQueueIndex =
       logical_device_->GetGraphicsQueueIndex();
   backend_context.fMinAPIVersion = application_->GetAPIVersion();
+  backend_context.fMaxAPIVersion = application_->GetAPIVersion();
   backend_context.fFeatures = skia_features;
   backend_context.fGetProc = std::move(getProc);
   backend_context.fOwnsInstanceAndDevice = false;
+  // The memory_requirements_2 extension is required on Fuchsia as the AMD
+  // memory allocator used by Skia benefit from it.
+  const char* device_extensions[] = {
+      VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+  };
+  GrVkExtensions vk_extensions;
+  vk_extensions.init(backend_context.fGetProc, backend_context.fInstance,
+                     backend_context.fPhysicalDevice, 0, nullptr,
+                     countof(device_extensions), device_extensions);
+  backend_context.fVkExtensions = &vk_extensions;
 
   context_ = GrContext::MakeVulkan(backend_context);
+
+  if (context_ == nullptr) {
+    FML_LOG(ERROR) << "Failed to create GrContext.";
+    return false;
+  }
 
   // Use local limits specified in this file above instead of flutter defaults.
   context_->setResourceCacheLimits(kGrCacheMaxCount, kGrCacheMaxByteSize);
@@ -142,7 +163,7 @@ void VulkanSurfaceProducer::OnSurfacesPresented(
   // Do a single flush for all canvases derived from the context.
   {
     TRACE_EVENT0("flutter", "GrContext::flushAndSignalSemaphores");
-    context_->flush();
+    context_->flushAndSubmit();
   }
 
   if (!TransitionSurfacesToExternal(surfaces))
@@ -199,16 +220,22 @@ bool VulkanSurfaceProducer::TransitionSurfacesToExternal(
     }
 
     VkImageMemoryBarrier image_barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = imageInfo.fImageLayout,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = 0,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL_KHR,
-        .image = vk_surface->GetVkImage(),
-        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .pNext = nullptr,
+      .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask = 0,
+      .oldLayout = imageInfo.fImageLayout,
+    // Understand why this is causing issues on Intel. TODO(fxb/53449)
+#if defined(__aarch64__)
+      .newLayout = imageInfo.fImageLayout,
+#else
+      .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+#endif
+      .srcQueueFamilyIndex = 0,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL_KHR,
+      .image = vk_surface->GetVkImage(),
+      .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}
+    };
 
     if (!command_buffer->InsertPipelineBarrier(
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,

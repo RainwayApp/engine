@@ -2,32 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+
 part of engine;
 
 // TODO(mdebbar): add other strategies.
 
 // Some parts of this file were inspired/copied from the AngularDart router.
-
-/// Ensures that `str` is prefixed with `leading`.
-///
-/// If `str` is already prefixed, it'll be returned unchanged. If it's not,
-/// this function will prefix it.
-///
-/// The `applyWhenEmpty` flag controls whether this function should prefix `str`
-/// or not when it's an empty string.
-///
-/// ```dart
-/// ensureLeading('/path', '/'); // "/path"
-/// ensureLeading('path', '/'); // "/path"
-/// ensureLeading('', '/'); // "/"
-/// ensureLeading('', '/', applyWhenEmpty: false); // ""
-/// ```
-String ensureLeading(String str, String leading, {bool applyWhenEmpty = true}) {
-  if (str.isEmpty && !applyWhenEmpty) {
-    return str;
-  }
-  return str.startsWith(leading) ? str : '$leading$str';
-}
 
 /// [LocationStrategy] is responsible for representing and reading route state
 /// from the browser's URL.
@@ -92,12 +72,14 @@ class HashLocationStrategy extends LocationStrategy {
     // the hash value is always prefixed with a `#`
     // and if it is empty then it will stay empty
     String path = _platformLocation.hash ?? '';
-    // Dart will complain if a call to substring is
-    // executed with a position value that exceeds the
-    // length of string.
-    path = path.isEmpty ? path : path.substring(1);
-    // The path, by convention, should always contain a leading '/'.
-    return ensureLeading(path, '/');
+    assert(path.isEmpty || path.startsWith('#'));
+
+    // We don't want to return an empty string as a path. Instead we default to "/".
+    if (path.isEmpty || path == '#') {
+      return '/';
+    }
+    // At this point, we know [path] starts with "#" and isn't empty.
+    return path.substring(1);
   }
 
   @override
@@ -133,7 +115,7 @@ class HashLocationStrategy extends LocationStrategy {
   /// `history.back` transition.
   Future<void> _waitForPopState() {
     final Completer<void> completer = Completer<void>();
-    ui.VoidCallback unsubscribe;
+    late ui.VoidCallback unsubscribe;
     unsubscribe = onPopState((_) {
       unsubscribe();
       completer.complete();
@@ -159,7 +141,7 @@ abstract class PlatformLocation {
 
   String get pathname;
   String get search;
-  String get hash;
+  String? get hash;
 
   void pushState(dynamic state, String title, String url);
   void replaceState(dynamic state, String title, String url);
@@ -194,10 +176,10 @@ class BrowserPlatformLocation extends PlatformLocation {
   }
 
   @override
-  String get pathname => _location.pathname;
+  String get pathname => _location.pathname!;
 
   @override
-  String get search => _location.search;
+  String get search => _location.search!;
 
   @override
   String get hash => _location.hash;

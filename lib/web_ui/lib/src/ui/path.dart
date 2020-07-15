@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.9
 part of ui;
 
 /// A complex, one-dimensional subset of a plane.
@@ -25,7 +26,7 @@ abstract class Path {
   /// Create a new empty [Path] object.
   factory Path() {
     if (engine.experimentalUseSkia) {
-      return engine.SkPath();
+      return engine.CkPath();
     } else {
       return engine.SurfacePath();
     }
@@ -37,9 +38,9 @@ abstract class Path {
   /// the `source` path or the path returned by this constructor are modified.
   factory Path.from(Path source) {
     if (engine.experimentalUseSkia) {
-      return engine.SkPath.from(source);
+      return engine.CkPath.from(source as engine.CkPath);
     } else {
-      return engine.SurfacePath.from(source);
+      return engine.SurfacePath.from(source as engine.SurfacePath);
     }
   }
 
@@ -208,15 +209,15 @@ abstract class Path {
   /// If `matrix4` is specified, the path will be transformed by this matrix
   /// after the matrix is translated by the given offset. The matrix is a 4x4
   /// matrix stored in column major order.
-  void addPath(Path path, Offset offset, {Float64List matrix4});
+  void addPath(Path path, Offset offset, {Float64List? matrix4});
 
   /// Adds the given path to this path by extending the current segment of this
-  /// path with the the first segment of the given path.
+  /// path with the first segment of the given path.
   ///
   /// If `matrix4` is specified, the path will be transformed by this matrix
   /// after the matrix is translated by the given `offset`.  The matrix is a 4x4
   /// matrix stored in column major order.
-  void extendWithPath(Path path, Offset offset, {Float64List matrix4});
+  void extendWithPath(Path path, Offset offset, {Float64List? matrix4});
 
   /// Closes the last subpath, as if a straight line had been drawn
   /// from the current point to the first point of the subpath.
@@ -234,10 +235,6 @@ abstract class Path {
   /// The `point` argument is interpreted as an offset from the origin.
   ///
   /// Returns true if the point is in the path, and false otherwise.
-  ///
-  /// Note: Not very efficient, it creates a canvas, plays path and calls
-  /// Context2D isPointInPath. If performance becomes issue, retaining
-  /// RawRecordingCanvas can remove create/remove rootElement cost.
   bool contains(Offset point);
 
   /// Returns a copy of the path with all the segments of every
@@ -272,10 +269,10 @@ abstract class Path {
   /// curve order is reduced where possible so that cubics may be turned into
   /// quadratics, and quadratics maybe turned into lines.
   static Path combine(PathOperation operation, Path path1, Path path2) {
-    assert(path1 != null);
-    assert(path2 != null);
+    assert(path1 != null); // ignore: unnecessary_null_comparison
+    assert(path2 != null); // ignore: unnecessary_null_comparison
     if (engine.experimentalUseSkia) {
-      return engine.SkPath.combine(operation, path1, path2);
+      return engine.CkPath.combine(operation, path1, path2);
     }
     throw UnimplementedError();
   }

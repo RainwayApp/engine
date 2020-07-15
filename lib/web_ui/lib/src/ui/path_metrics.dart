@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.9
 part of ui;
 
 /// An iterable collection of [PathMetric] objects describing a [Path].
@@ -16,14 +17,16 @@ part of ui;
 /// another [Path.lineTo] will contain two contours and thus be represented by
 /// two [PathMetric] objects.
 ///
-/// When iterating across a [PathMetrics]' contours, the [PathMetric] objects
-/// are only valid until the next one is obtained.
+/// This iterable does not memoize. Callers who need to traverse the list
+/// multiple times, or who need to randomly access elements of the list, should
+/// use [toList] on this object.
 abstract class PathMetrics extends collection.IterableBase<PathMetric> {
   @override
   Iterator<PathMetric> get iterator;
 }
 
-/// Tracks iteration from one segment of a path to the next for measurement.
+/// Used by [PathMetrics] to track iteration from one segment of a path to the
+/// next for measurement.
 abstract class PathMetricIterator implements Iterator<PathMetric> {
   @override
   PathMetric get current;
@@ -32,14 +35,19 @@ abstract class PathMetricIterator implements Iterator<PathMetric> {
   bool moveNext();
 }
 
-/// Utilities for measuring a [Path] and extracting subpaths.
+/// Utilities for measuring a [Path] and extracting sub-paths.
 ///
 /// Iterate over the object returned by [Path.computeMetrics] to obtain
-/// [PathMetric] objects.
+/// [PathMetric] objects. Callers that want to randomly access elements or
+/// iterate multiple times should use `path.computeMetrics().toList()`, since
+/// [PathMetrics] does not memoize.
 ///
-/// Once created, metrics will only be valid while the iterator is at the given
-/// contour. When the next contour's [PathMetric] is obtained, this object
-/// becomes invalid.
+/// Once created, the metrics are only valid for the path as it was specified
+/// when [Path.computeMetrics] was called. If additional contours are added or
+/// any contours are updated, the metrics need to be recomputed. Previously
+/// created metrics will still refer to a snapshot of the path at the time they
+/// were computed, rather than to the actual metrics for the new mutations to
+/// the path.
 ///
 /// Implementation is based on
 /// https://github.com/google/skia/blob/master/src/core/SkContourMeasure.cpp
@@ -72,14 +80,14 @@ abstract class PathMetric {
   /// Returns null if the contour has zero [length].
   ///
   /// The distance is clamped to the [length] of the current contour.
-  Tangent getTangentForOffset(double distance);
+  Tangent? getTangentForOffset(double distance);
 
   /// Given a start and stop distance, return the intervening segment(s).
   ///
   /// `start` and `end` are pinned to legal values (0..[length])
   /// Returns null if the segment is 0 length or `start` > `stop`.
   /// Begin the segment with a moveTo if `startWithMoveTo` is true.
-  Path extractPath(double start, double end, {bool startWithMoveTo = true});
+  Path? extractPath(double start, double end, {bool startWithMoveTo = true});
 
   /// Whether the contour is closed.
   ///
@@ -100,8 +108,8 @@ class Tangent {
   ///
   /// The arguments must not be null.
   const Tangent(this.position, this.vector)
-      : assert(position != null),
-        assert(vector != null);
+      : assert(position != null), // ignore: unnecessary_null_comparison
+        assert(vector != null); // ignore: unnecessary_null_comparison
 
   /// Creates a [Tangent] based on the angle rather than the vector.
   ///

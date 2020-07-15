@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.6
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -83,13 +84,6 @@ void main() {
     checkEquality(A, A);
     checkEquality(A, B);
     checkEquality(B, B);
-  });
-
-  test('ImageFilter - nulls', () async {
-    final Paint paint = Paint()..imageFilter = ImageFilter.blur(sigmaX: null, sigmaY: null);
-    expect(paint.imageFilter, equals(ImageFilter.blur()));
-
-    expect(() => ImageFilter.matrix(null), throwsNoSuchMethodError);
   });
 
   void checkBytes(Uint32List bytes, int center, int side, int corner) {

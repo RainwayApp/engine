@@ -11,13 +11,16 @@
 #include "flutter/fml/closure.h"
 #include "flutter/fml/make_copyable.h"
 #include "flutter/fml/native_library.h"
+#include "third_party/dart/runtime/bin/elf_loader.h"
 #include "third_party/dart/runtime/include/dart_native_api.h"
 
+#if !defined(FLUTTER_NO_EXPORT)
 #if OS_WIN
 #define FLUTTER_EXPORT __declspec(dllexport)
 #else  // OS_WIN
 #define FLUTTER_EXPORT __attribute__((visibility("default")))
 #endif  // OS_WIN
+#endif  // !FLUTTER_NO_EXPORT
 
 extern "C" {
 #if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_DEBUG
@@ -532,6 +535,83 @@ struct _FlutterPlatformMessageResponseHandle {
   fml::RefPtr<flutter::PlatformMessage> message;
 };
 
+struct LoadedElfDeleter {
+  void operator()(Dart_LoadedElf* elf) {
+    if (elf) {
+      ::Dart_UnloadELF(elf);
+    }
+  }
+};
+
+using UniqueLoadedElf = std::unique_ptr<Dart_LoadedElf, LoadedElfDeleter>;
+
+struct _FlutterEngineAOTData {
+  UniqueLoadedElf loaded_elf = nullptr;
+  const uint8_t* vm_snapshot_data = nullptr;
+  const uint8_t* vm_snapshot_instrs = nullptr;
+  const uint8_t* vm_isolate_data = nullptr;
+  const uint8_t* vm_isolate_instrs = nullptr;
+};
+
+FlutterEngineResult FlutterEngineCreateAOTData(
+    const FlutterEngineAOTDataSource* source,
+    FlutterEngineAOTData* data_out) {
+  if (!flutter::DartVM::IsRunningPrecompiledCode()) {
+    return LOG_EMBEDDER_ERROR(kInvalidArguments,
+                              "AOT data can only be created in AOT mode.");
+  } else if (!source) {
+    return LOG_EMBEDDER_ERROR(kInvalidArguments, "Null source specified.");
+  } else if (!data_out) {
+    return LOG_EMBEDDER_ERROR(kInvalidArguments, "Null data_out specified.");
+  }
+
+  switch (source->type) {
+    case kFlutterEngineAOTDataSourceTypeElfPath: {
+      if (!source->elf_path || !fml::IsFile(source->elf_path)) {
+        return LOG_EMBEDDER_ERROR(kInvalidArguments,
+                                  "Invalid ELF path specified.");
+      }
+
+      auto aot_data = std::make_unique<_FlutterEngineAOTData>();
+      const char* error = nullptr;
+
+      Dart_LoadedElf* loaded_elf = Dart_LoadELF(
+          source->elf_path,               // file path
+          0,                              // file offset
+          &error,                         // error (out)
+          &aot_data->vm_snapshot_data,    // vm snapshot data (out)
+          &aot_data->vm_snapshot_instrs,  // vm snapshot instr (out)
+          &aot_data->vm_isolate_data,     // vm isolate data (out)
+          &aot_data->vm_isolate_instrs    // vm isolate instr (out)
+      );
+
+      if (loaded_elf == nullptr) {
+        return LOG_EMBEDDER_ERROR(kInvalidArguments, error);
+      }
+
+      aot_data->loaded_elf.reset(loaded_elf);
+
+      *data_out = aot_data.release();
+      return kSuccess;
+    }
+  }
+
+  return LOG_EMBEDDER_ERROR(
+      kInvalidArguments,
+      "Invalid FlutterEngineAOTDataSourceType type specified.");
+}
+
+FlutterEngineResult FlutterEngineCollectAOTData(FlutterEngineAOTData data) {
+  if (data) {
+    data->loaded_elf = nullptr;
+    data->vm_snapshot_data = nullptr;
+    data->vm_snapshot_instrs = nullptr;
+    data->vm_isolate_data = nullptr;
+    data->vm_isolate_instrs = nullptr;
+  }
+  return kSuccess;
+}
+
 void PopulateSnapshotMappingCallbacks(const FlutterProjectArgs* args,
                                       flutter::Settings& settings) {
   // There are no ownership concerns here as all mappings are owned by the
@@ -543,6 +623,20 @@ void PopulateSnapshotMappingCallbacks(const FlutterProjectArgs* args,
   };
 
   if (flutter::DartVM::IsRunningPrecompiledCode()) {
+    if (SAFE_ACCESS(args, aot_data, nullptr) != nullptr) {
+      settings.vm_snapshot_data =
+          make_mapping_callback(args->aot_data->vm_snapshot_data, 0);
+
+      settings.vm_snapshot_instr =
+          make_mapping_callback(args->aot_data->vm_snapshot_instrs, 0);
+
+      settings.isolate_snapshot_data =
+          make_mapping_callback(args->aot_data->vm_isolate_data, 0);
+
+      settings.isolate_snapshot_instr =
+          make_mapping_callback(args->aot_data->vm_isolate_instrs, 0);
+    }
+
     if (SAFE_ACCESS(args, vm_snapshot_data, nullptr) != nullptr) {
       settings.vm_snapshot_data = make_mapping_callback(
           args->vm_snapshot_data, SAFE_ACCESS(args, vm_snapshot_data_size, 0));
@@ -659,6 +753,18 @@ FlutterEngineResult FlutterEngineInitialize(size_t version,
 
   flutter::Settings settings = flutter::SettingsFromCommandLine(command_line);
 
+  if (SAFE_ACCESS(args, aot_data, nullptr)) {
+    if (SAFE_ACCESS(args, vm_snapshot_data, nullptr) ||
+        SAFE_ACCESS(args, vm_snapshot_instructions, nullptr) ||
+        SAFE_ACCESS(args, isolate_snapshot_data, nullptr) ||
+        SAFE_ACCESS(args, isolate_snapshot_instructions, nullptr)) {
+      return LOG_EMBEDDER_ERROR(
+          kInvalidArguments,
+          "Multiple AOT sources specified. Embedders should provide either "
+          "*_snapshot_* buffers or aot_data, not both.");
+    }
+  }
+
   PopulateSnapshotMappingCallbacks(args, settings);
 
   settings.icu_data_path = icu_data_path;
@@ -701,7 +807,7 @@ FlutterEngineResult FlutterEngineInitialize(size_t version,
          user_data](flutter::SemanticsNodeUpdates update) {
           for (const auto& value : update) {
             const auto& node = value.second;
-            SkMatrix transform = static_cast<SkMatrix>(node.transform);
+            SkMatrix transform = node.transform.asM33();
             FlutterTransformation flutter_transform{
                 transform.get(SkMatrix::kMScaleX),
                 transform.get(SkMatrix::kMSkewX),
@@ -831,8 +937,8 @@ FlutterEngineResult FlutterEngineInitialize(size_t version,
 
   flutter::Shell::CreateCallback<flutter::Rasterizer> on_create_rasterizer =
       [](flutter::Shell& shell) {
-        return std::make_unique<flutter::Rasterizer>(shell,
-                                                     shell.GetTaskRunners());
+        return std::make_unique<flutter::Rasterizer>(
+            shell, shell.GetTaskRunners(), shell.GetIsGpuDisabledSyncSwitch());
       };
 
   // TODO(chinmaygarde): This is the wrong spot for this. It belongs in the
@@ -1119,6 +1225,8 @@ FlutterEngineResult FlutterEngineSendPointerEvent(
   for (size_t i = 0; i < events_count; ++i) {
     flutter::PointerData pointer_data;
     pointer_data.Clear();
+    // this is currely in use only on android embedding.
+    pointer_data.embedder_id = 0;
     pointer_data.time_stamp = SAFE_ACCESS(current, timestamp, 0);
     pointer_data.change = ToPointerDataChange(
         SAFE_ACCESS(current, phase, FlutterPointerPhase::kCancel));
@@ -1665,7 +1773,7 @@ FlutterEngineResult FlutterEnginePostDartObject(
           SAFE_ACCESS(object->buffer_value, buffer_collect_callback, nullptr);
       auto user_data = SAFE_ACCESS(object->buffer_value, user_data, nullptr);
 
-      // The the user has provided a callback, let them manage the lifecycle of
+      // The user has provided a callback, let them manage the lifecycle of
       // the underlying data. If not, copy it out from the provided buffer.
 
       if (callback == nullptr) {
@@ -1724,7 +1832,6 @@ FlutterEngineResult FlutterEnginePostDartObject(
   return kSuccess;
 }
 
-FLUTTER_EXPORT
 FlutterEngineResult FlutterEngineNotifyLowMemoryWarning(
     FLUTTER_API_SYMBOL(FlutterEngine) raw_engine) {
   auto engine = reinterpret_cast<flutter::EmbedderEngine*>(raw_engine);
@@ -1746,4 +1853,28 @@ FlutterEngineResult FlutterEngineNotifyLowMemoryWarning(
              : LOG_EMBEDDER_ERROR(
                    kInternalInconsistency,
                    "Could not dispatch the low memory notification message.");
+}
+
+FlutterEngineResult FlutterEnginePostCallbackOnAllNativeThreads(
+    FLUTTER_API_SYMBOL(FlutterEngine) engine,
+    FlutterNativeThreadCallback callback,
+    void* user_data) {
+  if (engine == nullptr) {
+    return LOG_EMBEDDER_ERROR(kInvalidArguments, "Invalid engine handle.");
+  }
+
+  if (callback == nullptr) {
+    return LOG_EMBEDDER_ERROR(kInvalidArguments,
+                              "Invalid native thread callback.");
+  }
+
+  return reinterpret_cast<flutter::EmbedderEngine*>(engine)
+                 ->PostTaskOnEngineManagedNativeThreads(
+                     [callback, user_data](FlutterNativeThreadType type) {
+                       callback(type, user_data);
+                     })
+             ? kSuccess
+             : LOG_EMBEDDER_ERROR(kInvalidArguments,
+                                  "Internal error while attempting to post "
+                                  "tasks to all threads.");
 }

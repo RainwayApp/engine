@@ -16,9 +16,9 @@
 #include "flutter/fml/mapping.h"
 #include "flutter/shell/platform/embedder/embedder.h"
 #include "flutter/shell/platform/embedder/tests/embedder_test_compositor.h"
+#include "flutter/testing/elf_loader.h"
 #include "flutter/testing/test_dart_native_resolver.h"
 #include "flutter/testing/test_gl_surface.h"
-#include "third_party/dart/runtime/bin/elf_loader.h"
 #include "third_party/skia/include/core/SkImage.h"
 
 namespace flutter {
@@ -27,6 +27,16 @@ namespace testing {
 using SemanticsNodeCallback = std::function<void(const FlutterSemanticsNode*)>;
 using SemanticsActionCallback =
     std::function<void(const FlutterSemanticsCustomAction*)>;
+
+struct AOTDataDeleter {
+  void operator()(FlutterEngineAOTData aot_data) {
+    if (aot_data) {
+      FlutterEngineCollectAOTData(aot_data);
+    }
+  }
+};
+
+using UniqueAOTData = std::unique_ptr<_FlutterEngineAOTData, AOTDataDeleter>;
 
 class EmbedderTestContext {
  public:
@@ -43,6 +53,8 @@ class EmbedderTestContext {
   const fml::Mapping* GetIsolateSnapshotData() const;
 
   const fml::Mapping* GetIsolateSnapshotInstructions() const;
+
+  FlutterEngineAOTData GetAOTData() const;
 
   void SetRootSurfaceTransformation(SkMatrix matrix);
 
@@ -74,14 +86,12 @@ class EmbedderTestContext {
   using NextSceneCallback = std::function<void(sk_sp<SkImage> image)>;
 
   std::string assets_path_;
-
-  // Pieces of the Dart snapshot in ELF form, loaded by Dart's ELF library.
-  Dart_LoadedElf* elf_library_handle_ = nullptr;
+  ELFAOTSymbols aot_symbols_;
   std::unique_ptr<fml::Mapping> vm_snapshot_data_;
   std::unique_ptr<fml::Mapping> vm_snapshot_instructions_;
   std::unique_ptr<fml::Mapping> isolate_snapshot_data_;
   std::unique_ptr<fml::Mapping> isolate_snapshot_instructions_;
-
+  UniqueAOTData aot_data_;
   std::vector<fml::closure> isolate_create_callbacks_;
   std::shared_ptr<TestDartNativeResolver> native_resolver_;
   SemanticsNodeCallback update_semantics_node_callback_;
@@ -101,6 +111,10 @@ class EmbedderTestContext {
 
   static FlutterUpdateSemanticsCustomActionCallback
   GetUpdateSemanticsCustomActionCallbackHook();
+
+  void SetupAOTMappingsIfNecessary();
+
+  void SetupAOTDataIfNecessary();
 
   void SetupCompositor();
 

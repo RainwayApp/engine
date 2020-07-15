@@ -23,23 +23,30 @@
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterPlatformPlugin.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputDelegate.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/FlutterViewController_Internal.h"
+#import "flutter/shell/platform/darwin/ios/framework/Source/connection_collection.h"
 #import "flutter/shell/platform/darwin/ios/framework/Source/platform_message_response_darwin.h"
+#import "flutter/shell/platform/darwin/ios/framework/Source/profiler_metrics_ios.h"
 #import "flutter/shell/platform/darwin/ios/ios_surface.h"
 #import "flutter/shell/platform/darwin/ios/platform_view_ios.h"
+#include "flutter/shell/platform/darwin/ios/rendering_api_selection.h"
+#include "flutter/shell/profiling/sampling_profiler.h"
 
 NSString* const FlutterDefaultDartEntrypoint = nil;
+static constexpr int kNumProfilerSamplesPerSec = 5;
+
+@interface FlutterEngineRegistrar : NSObject <FlutterPluginRegistrar>
+@property(nonatomic, assign) FlutterEngine* flutterEngine;
+- (instancetype)initWithPlugin:(NSString*)pluginKey flutterEngine:(FlutterEngine*)flutterEngine;
+@end
 
 @interface FlutterEngine () <FlutterTextInputDelegate, FlutterBinaryMessenger>
 // Maintains a dictionary of plugin names that have registered with the engine.  Used by
 // FlutterEngineRegistrar to implement a FlutterPluginRegistrar.
 @property(nonatomic, readonly) NSMutableDictionary* pluginPublications;
+@property(nonatomic, readonly) NSMutableDictionary<NSString*, FlutterEngineRegistrar*>* registrars;
 
 @property(nonatomic, readwrite, copy) NSString* isolateId;
 @property(nonatomic, retain) id<NSObject> flutterViewControllerWillDeallocObserver;
-@end
-
-@interface FlutterEngineRegistrar : NSObject <FlutterPluginRegistrar>
-- (instancetype)initWithPlugin:(NSString*)pluginKey flutterEngine:(FlutterEngine*)flutterEngine;
 @end
 
 @implementation FlutterEngine {
@@ -53,6 +60,8 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   fml::scoped_nsobject<FlutterObservatoryPublisher> _publisher;
 
   std::unique_ptr<flutter::FlutterPlatformViewsController> _platformViewsController;
+  std::unique_ptr<flutter::ProfilerMetricsIOS> _profiler_metrics;
+  std::unique_ptr<flutter::SamplingProfiler> _profiler;
 
   // Channels
   fml::scoped_nsobject<FlutterPlatformPlugin> _platformPlugin;
@@ -70,6 +79,7 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
   BOOL _allowHeadlessExecution;
   FlutterBinaryMessengerRelay* _binaryMessenger;
+  std::unique_ptr<flutter::ConnectionCollection> _connections;
 }
 
 - (instancetype)initWithName:(NSString*)labelPrefix {
@@ -98,14 +108,21 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
     _dartProject.reset([project retain]);
 
   _pluginPublications = [NSMutableDictionary new];
+  _registrars = [[NSMutableDictionary alloc] init];
   _platformViewsController.reset(new flutter::FlutterPlatformViewsController());
 
   _binaryMessenger = [[FlutterBinaryMessengerRelay alloc] initWithParent:self];
+  _connections.reset(new flutter::ConnectionCollection());
 
   NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
   [center addObserver:self
              selector:@selector(onMemoryWarning:)
                  name:UIApplicationDidReceiveMemoryWarningNotification
+               object:nil];
+
+  [center addObserver:self
+             selector:@selector(applicationDidEnterBackground:)
+                 name:UIApplicationDidEnterBackgroundNotification
                object:nil];
 
   [center addObserver:self
@@ -118,11 +135,33 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
                  name:UIApplicationWillResignActiveNotification
                object:nil];
 
+  [center addObserver:self
+             selector:@selector(onLocaleUpdated:)
+                 name:NSCurrentLocaleDidChangeNotification
+               object:nil];
+
   return self;
 }
 
 - (void)dealloc {
+  /// Notify plugins of dealloc.  This should happen first in dealloc since the
+  /// plugins may be talking to things like the binaryMessenger.
+  [_pluginPublications enumerateKeysAndObjectsUsingBlock:^(id key, id object, BOOL* stop) {
+    if ([object respondsToSelector:@selector(detachFromEngineForRegistrar:)]) {
+      NSObject<FlutterPluginRegistrar>* registrar = self.registrars[key];
+      [object detachFromEngineForRegistrar:registrar];
+    }
+  }];
+
+  /// nil out weak references.
+  [_registrars
+      enumerateKeysAndObjectsUsingBlock:^(id key, FlutterEngineRegistrar* registrar, BOOL* stop) {
+        registrar.flutterEngine = nil;
+      }];
+
+  [_labelPrefix release];
   [_pluginPublications release];
+  [_registrars release];
   _binaryMessenger.parent = nil;
   [_binaryMessenger release];
 
@@ -174,9 +213,9 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   return _shell->GetTaskRunners().GetPlatformTaskRunner();
 }
 
-- (fml::RefPtr<fml::TaskRunner>)GPUTaskRunner {
+- (fml::RefPtr<fml::TaskRunner>)RasterTaskRunner {
   FML_DCHECK(_shell);
-  return _shell->GetTaskRunners().GetGPUTaskRunner();
+  return _shell->GetTaskRunners().GetRasterTaskRunner();
 }
 
 - (void)ensureSemanticsEnabled {
@@ -201,7 +240,12 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
                                                       }];
   } else {
     self.flutterViewControllerWillDeallocObserver = nil;
+    [self notifyLowMemory];
   }
+}
+
+- (void)attachView {
+  self.iosPlatformView->attachView();
 }
 
 - (void)setFlutterViewControllerWillDeallocObserver:(id<NSObject>)observer {
@@ -232,6 +276,7 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   [self resetChannels];
   self.isolateId = nil;
   _shell.reset();
+  _profiler.reset();
   _threadHost.Reset();
   _platformViewsController.reset();
 }
@@ -287,6 +332,14 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   _lifecycleChannel.reset();
   _systemChannel.reset();
   _settingsChannel.reset();
+}
+
+- (void)startProfiler:(NSString*)threadLabel {
+  _profiler_metrics = std::make_unique<flutter::ProfilerMetricsIOS>();
+  _profiler = std::make_unique<flutter::SamplingProfiler>(
+      threadLabel.UTF8String, _threadHost.profiler_thread->GetTaskRunner(),
+      [self]() { return self->_profiler_metrics->GenerateSample(); }, kNumProfilerSamplesPerSec);
+  _profiler->Start();
 }
 
 // If you add a channel, be sure to also update `resetChannels`.
@@ -352,19 +405,23 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
 - (void)maybeSetupPlatformViewChannels {
   if (_shell && self.shell.IsSetup()) {
+    FlutterPlatformPlugin* platformPlugin = _platformPlugin.get();
     [_platformChannel.get() setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
-      [_platformPlugin.get() handleMethodCall:call result:result];
+      [platformPlugin handleMethodCall:call result:result];
     }];
 
+    fml::WeakPtr<FlutterEngine> weakSelf = [self getWeakPtr];
     [_platformViewsChannel.get()
         setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
-          _platformViewsController->OnMethodCall(call, result);
+          if (weakSelf) {
+            weakSelf.get().platformViewsController->OnMethodCall(call, result);
+          }
         }];
 
+    FlutterTextInputPlugin* textInputPlugin = _textInputPlugin.get();
     [_textInputChannel.get() setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
-      [_textInputPlugin.get() handleMethodCall:call result:result];
+      [textInputPlugin handleMethodCall:call result:result];
     }];
-    self.iosPlatformView->SetTextInputPlugin(_textInputPlugin);
   }
 }
 
@@ -403,26 +460,37 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   }
 
   const auto threadLabel = [NSString stringWithFormat:@"%@.%zu", _labelPrefix, shellCount++];
-  FML_DLOG(INFO) << "Creating threadHost for " << threadLabel.UTF8String;
+
   // The current thread will be used as the platform thread. Ensure that the message loop is
   // initialized.
   fml::MessageLoop::EnsureInitializedForCurrentThread();
 
+  uint32_t threadHostType = flutter::ThreadHost::Type::UI | flutter::ThreadHost::Type::GPU |
+                            flutter::ThreadHost::Type::IO;
+  bool profilerEnabled = false;
+#if (FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_DEBUG) || \
+    (FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_PROFILE)
+  profilerEnabled = true;
+#endif
+  if (profilerEnabled) {
+    threadHostType = threadHostType | flutter::ThreadHost::Type::Profiler;
+  }
   _threadHost = {threadLabel.UTF8String,  // label
-                 flutter::ThreadHost::Type::UI | flutter::ThreadHost::Type::GPU |
-                     flutter::ThreadHost::Type::IO};
+                 threadHostType};
 
   // Lambda captures by pointers to ObjC objects are fine here because the
   // create call is
   // synchronous.
   flutter::Shell::CreateCallback<flutter::PlatformView> on_create_platform_view =
       [](flutter::Shell& shell) {
-        return std::make_unique<flutter::PlatformViewIOS>(shell, shell.GetTaskRunners());
+        return std::make_unique<flutter::PlatformViewIOS>(
+            shell, flutter::GetRenderingAPIForProcess(), shell.GetTaskRunners());
       };
 
   flutter::Shell::CreateCallback<flutter::Rasterizer> on_create_rasterizer =
       [](flutter::Shell& shell) {
-        return std::make_unique<flutter::Rasterizer>(shell, shell.GetTaskRunners());
+        return std::make_unique<flutter::Rasterizer>(shell, shell.GetTaskRunners(),
+                                                     shell.GetIsGpuDisabledSyncSwitch());
       };
 
   if (flutter::IsIosEmbeddedViewsPreviewEnabled()) {
@@ -436,7 +504,7 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
     flutter::TaskRunners task_runners(threadLabel.UTF8String,                          // label
                                       fml::MessageLoop::GetCurrent().GetTaskRunner(),  // platform
-                                      fml::MessageLoop::GetCurrent().GetTaskRunner(),  // gpu
+                                      fml::MessageLoop::GetCurrent().GetTaskRunner(),  // raster
                                       _threadHost.ui_thread->GetTaskRunner(),          // ui
                                       _threadHost.io_thread->GetTaskRunner()           // io
     );
@@ -450,7 +518,7 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   } else {
     flutter::TaskRunners task_runners(threadLabel.UTF8String,                          // label
                                       fml::MessageLoop::GetCurrent().GetTaskRunner(),  // platform
-                                      _threadHost.gpu_thread->GetTaskRunner(),         // gpu
+                                      _threadHost.raster_thread->GetTaskRunner(),      // raster
                                       _threadHost.ui_thread->GetTaskRunner(),          // ui
                                       _threadHost.io_thread->GetTaskRunner()           // io
     );
@@ -468,12 +536,16 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
                    << entrypoint.UTF8String;
   } else {
     [self setupChannels];
+    [self onLocaleUpdated:nil];
     if (!_platformViewsController) {
       _platformViewsController.reset(new flutter::FlutterPlatformViewsController());
     }
     _publisher.reset([[FlutterObservatoryPublisher alloc] init]);
     [self maybeSetupPlatformViewChannels];
     _shell->GetIsGpuDisabledSyncSwitch()->SetSwitch(_isGpuDisabled ? true : false);
+    if (profilerEnabled) {
+      [self startProfiler:threadLabel];
+    }
   }
 
   return _shell != nullptr;
@@ -495,11 +567,23 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   return [self runWithEntrypoint:entrypoint libraryURI:nil];
 }
 
+- (void)notifyLowMemory {
+  if (_shell) {
+    _shell->NotifyLowMemoryWarning();
+  }
+  [_systemChannel sendMessage:@{@"type" : @"memoryPressure"}];
+}
+
 #pragma mark - Text input delegate
 
 - (void)updateEditingClient:(int)client withState:(NSDictionary*)state {
   [_textInputChannel.get() invokeMethod:@"TextInputClient.updateEditingState"
                               arguments:@[ @(client), state ]];
+}
+
+- (void)updateEditingClient:(int)client withState:(NSDictionary*)state withTag:(NSString*)tag {
+  [_textInputChannel.get() invokeMethod:@"TextInputClient.updateEditingStateWithTag"
+                              arguments:@[ @(client), @{tag : state} ]];
 }
 
 - (void)updateFloatingCursor:(FlutterFloatingCursorDragState)state
@@ -566,6 +650,13 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
                               arguments:@[ @(client), actionString ]];
 }
 
+- (void)showAutocorrectionPromptRectForStart:(NSUInteger)start
+                                         end:(NSUInteger)end
+                                  withClient:(int)client {
+  [_textInputChannel.get() invokeMethod:@"TextInputClient.showAutocorrectionPromptRect"
+                              arguments:@[ @(client), @(start), @(end) ]];
+}
+
 #pragma mark - Screenshot Delegate
 
 - (flutter::Rasterizer::Screenshot)takeScreenshot:(flutter::Rasterizer::ScreenshotType)type
@@ -605,12 +696,27 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   _shell->GetPlatformView()->DispatchPlatformMessage(platformMessage);
 }
 
-- (void)setMessageHandlerOnChannel:(NSString*)channel
-              binaryMessageHandler:(FlutterBinaryMessageHandler)handler {
+- (FlutterBinaryMessengerConnection)setMessageHandlerOnChannel:(NSString*)channel
+                                          binaryMessageHandler:
+                                              (FlutterBinaryMessageHandler)handler {
   NSParameterAssert(channel);
-  NSAssert(_shell && _shell->IsSetup(),
-           @"Setting a message handler before the FlutterEngine has been run.");
-  self.iosPlatformView->GetPlatformMessageRouter().SetMessageHandler(channel.UTF8String, handler);
+  if (_shell && _shell->IsSetup()) {
+    self.iosPlatformView->GetPlatformMessageRouter().SetMessageHandler(channel.UTF8String, handler);
+    return _connections->AquireConnection(channel.UTF8String);
+  } else {
+    NSAssert(!handler, @"Setting a message handler before the FlutterEngine has been run.");
+    // Setting a handler to nil for a not setup channel is a noop.
+    return flutter::ConnectionCollection::MakeErrorConnection(-1);
+  }
+}
+
+- (void)cleanupConnection:(FlutterBinaryMessengerConnection)connection {
+  if (_shell && _shell->IsSetup()) {
+    std::string channel = _connections->CleanupConnection(connection);
+    if (!channel.empty()) {
+      self.iosPlatformView->GetPlatformMessageRouter().SetMessageHandler(channel.c_str(), nil);
+    }
+  }
 }
 
 #pragma mark - FlutterTextureRegistry
@@ -646,7 +752,10 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 - (NSObject<FlutterPluginRegistrar>*)registrarForPlugin:(NSString*)pluginKey {
   NSAssert(self.pluginPublications[pluginKey] == nil, @"Duplicate plugin key: %@", pluginKey);
   self.pluginPublications[pluginKey] = [NSNull null];
-  return [[[FlutterEngineRegistrar alloc] initWithPlugin:pluginKey flutterEngine:self] autorelease];
+  FlutterEngineRegistrar* result = [[FlutterEngineRegistrar alloc] initWithPlugin:pluginKey
+                                                                    flutterEngine:self];
+  self.registrars[pluginKey] = result;
+  return [result autorelease];
 }
 
 - (BOOL)hasPlugin:(NSString*)pluginKey {
@@ -667,11 +776,12 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   [self setIsGpuDisabled:YES];
 }
 
+- (void)applicationDidEnterBackground:(NSNotification*)notification {
+  [self notifyLowMemory];
+}
+
 - (void)onMemoryWarning:(NSNotification*)notification {
-  if (_shell) {
-    _shell->NotifyLowMemoryWarning();
-  }
-  [_systemChannel sendMessage:@{@"type" : @"memoryPressure"}];
+  [self notifyLowMemory];
 }
 
 - (void)setIsGpuDisabled:(BOOL)value {
@@ -681,24 +791,67 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
   _isGpuDisabled = value;
 }
 
+#pragma mark - Locale updates
+
+- (void)onLocaleUpdated:(NSNotification*)notification {
+  // [NSLocale currentLocale] provides an iOS resolved locale if the
+  // supported locales are exposed to the iOS embedder. Here, we get
+  // currentLocale and pass it to dart:ui
+  NSMutableArray<NSString*>* localeData = [[NSMutableArray new] autorelease];
+  NSLocale* platformResolvedLocale = [NSLocale currentLocale];
+  NSString* languageCode = [platformResolvedLocale objectForKey:NSLocaleLanguageCode];
+  NSString* countryCode = [platformResolvedLocale objectForKey:NSLocaleCountryCode];
+  NSString* scriptCode = [platformResolvedLocale objectForKey:NSLocaleScriptCode];
+  NSString* variantCode = [platformResolvedLocale objectForKey:NSLocaleVariantCode];
+  if (languageCode) {
+    [localeData addObject:languageCode];
+    [localeData addObject:(countryCode ? countryCode : @"")];
+    [localeData addObject:(scriptCode ? scriptCode : @"")];
+    [localeData addObject:(variantCode ? variantCode : @"")];
+  }
+  if (localeData.count != 0) {
+    [self.localizationChannel invokeMethod:@"setPlatformResolvedLocale" arguments:localeData];
+  }
+
+  // Get and pass the user's preferred locale list to dart:ui
+  localeData = [[NSMutableArray new] autorelease];
+  NSArray<NSString*>* preferredLocales = [NSLocale preferredLanguages];
+  for (NSString* localeID in preferredLocales) {
+    NSLocale* locale = [[[NSLocale alloc] initWithLocaleIdentifier:localeID] autorelease];
+    NSString* languageCode = [locale objectForKey:NSLocaleLanguageCode];
+    NSString* countryCode = [locale objectForKey:NSLocaleCountryCode];
+    NSString* scriptCode = [locale objectForKey:NSLocaleScriptCode];
+    NSString* variantCode = [locale objectForKey:NSLocaleVariantCode];
+    if (!languageCode) {
+      continue;
+    }
+    [localeData addObject:languageCode];
+    [localeData addObject:(countryCode ? countryCode : @"")];
+    [localeData addObject:(scriptCode ? scriptCode : @"")];
+    [localeData addObject:(variantCode ? variantCode : @"")];
+  }
+  if (localeData.count == 0) {
+    return;
+  }
+  [self.localizationChannel invokeMethod:@"setLocale" arguments:localeData];
+}
+
 @end
 
 @implementation FlutterEngineRegistrar {
   NSString* _pluginKey;
-  FlutterEngine* _flutterEngine;
 }
 
 - (instancetype)initWithPlugin:(NSString*)pluginKey flutterEngine:(FlutterEngine*)flutterEngine {
   self = [super init];
   NSAssert(self, @"Super init cannot be nil");
-  _pluginKey = [pluginKey retain];
-  _flutterEngine = [flutterEngine retain];
+  _pluginKey = [pluginKey copy];
+  _flutterEngine = flutterEngine;
   return self;
 }
 
 - (void)dealloc {
   [_pluginKey release];
-  [_flutterEngine release];
   [super dealloc];
 }
 
@@ -740,7 +893,17 @@ NSString* const FlutterDefaultDartEntrypoint = nil;
 
 - (void)registerViewFactory:(NSObject<FlutterPlatformViewFactory>*)factory
                      withId:(NSString*)factoryId {
-  [_flutterEngine platformViewsController] -> RegisterViewFactory(factory, factoryId);
+  [self registerViewFactory:factory
+                                withId:factoryId
+      gestureRecognizersBlockingPolicy:FlutterPlatformViewGestureRecognizersBlockingPolicyEager];
+}
+
+- (void)registerViewFactory:(NSObject<FlutterPlatformViewFactory>*)factory
+                              withId:(NSString*)factoryId
+    gestureRecognizersBlockingPolicy:
+        (FlutterPlatformViewGestureRecognizersBlockingPolicy)gestureRecognizersBlockingPolicy {
+  [_flutterEngine platformViewsController]->RegisterViewFactory(factory, factoryId,
+                                                                gestureRecognizersBlockingPolicy);
 }
 
 @end

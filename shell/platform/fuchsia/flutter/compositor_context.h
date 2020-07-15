@@ -35,6 +35,12 @@ class CompositorContext final : public flutter::CompositorContext {
                                float height_change_factor);
 
   void OnWireframeEnabled(bool enabled);
+  void OnCreateView(int64_t view_id, bool hit_testable, bool focusable);
+  void OnDestroyView(int64_t view_id);
+
+  flutter::ExternalViewEmbedder* GetViewEmbedder() {
+    return &session_connection_.scene_update_context();
+  }
 
  private:
   const std::string debug_label_;
@@ -49,7 +55,7 @@ class CompositorContext final : public flutter::CompositorContext {
       const SkMatrix& root_surface_transformation,
       bool instrumentation_enabled,
       bool surface_supports_readback,
-      fml::RefPtr<fml::GpuThreadMerger> gpu_thread_merger) override;
+      fml::RefPtr<fml::RasterThreadMerger> raster_thread_merger) override;
 
   FML_DISALLOW_COPY_AND_ASSIGN(CompositorContext);
 };

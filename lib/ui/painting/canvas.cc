@@ -25,6 +25,7 @@ using tonic::ToDart;
 namespace flutter {
 
 static void Canvas_constructor(Dart_NativeArguments args) {
+  UIDartState::ThrowIfUIOperationsProhibited();
   DartCallConstructor(&Canvas::Create, args);
 }
 
@@ -78,7 +79,6 @@ fml::RefPtr<Canvas> Canvas::Create(PictureRecorder* recorder,
   if (!recorder)
     Dart_ThrowException(
         ToDart("Canvas constructor called with non-genuine PictureRecorder."));
-  FML_DCHECK(!recorder->isRecording());  // verified by Dart code
   fml::RefPtr<Canvas> canvas = fml::MakeRefCounted<Canvas>(
       recorder->BeginRecording(SkRect::MakeLTRB(left, top, right, bottom)));
   recorder->set_canvas(canvas);
@@ -180,6 +180,7 @@ void Canvas::clipPath(const CanvasPath* path, bool doAntiAlias) {
   if (!path)
     Dart_ThrowException(
         ToDart("Canvas.clipPath called with non-genuine Path."));
+  external_allocation_size_ += path->path().approximateBytesUsed();
   canvas_->clipPath(path->path(), doAntiAlias);
 }
 
@@ -279,6 +280,7 @@ void Canvas::drawPath(const CanvasPath* path,
   if (!path)
     Dart_ThrowException(
         ToDart("Canvas.drawPath called with non-genuine Path."));
+  external_allocation_size_ += path->path().approximateBytesUsed();
   canvas_->drawPath(path->path(), *paint.paint());
 }
 
@@ -292,6 +294,7 @@ void Canvas::drawImage(const CanvasImage* image,
   if (!image)
     Dart_ThrowException(
         ToDart("Canvas.drawImage called with non-genuine Image."));
+  external_allocation_size_ += image->GetAllocationSize();
   canvas_->drawImage(image->image(), x, y, paint.paint());
 }
 
@@ -313,6 +316,7 @@ void Canvas::drawImageRect(const CanvasImage* image,
         ToDart("Canvas.drawImageRect called with non-genuine Image."));
   SkRect src = SkRect::MakeLTRB(src_left, src_top, src_right, src_bottom);
   SkRect dst = SkRect::MakeLTRB(dst_left, dst_top, dst_right, dst_bottom);
+  external_allocation_size_ += image->GetAllocationSize();
   canvas_->drawImageRect(image->image(), src, dst, paint.paint(),
                          SkCanvas::kFast_SrcRectConstraint);
 }
@@ -338,6 +342,7 @@ void Canvas::drawImageNine(const CanvasImage* image,
   SkIRect icenter;
   center.round(&icenter);
   SkRect dst = SkRect::MakeLTRB(dst_left, dst_top, dst_right, dst_bottom);
+  external_allocation_size_ += image->GetAllocationSize();
   canvas_->drawImageNine(image->image(), icenter, dst, paint.paint());
 }
 
@@ -347,6 +352,7 @@ void Canvas::drawPicture(Picture* picture) {
   if (!picture)
     Dart_ThrowException(
         ToDart("Canvas.drawPicture called with non-genuine Picture."));
+  external_allocation_size_ += picture->GetAllocationSize();
   canvas_->drawPicture(picture->picture().get());
 }
 
@@ -375,7 +381,7 @@ void Canvas::drawVertices(const Vertices* vertices,
   if (!vertices)
     Dart_ThrowException(
         ToDart("Canvas.drawVertices called with non-genuine Vertices."));
-
+  external_allocation_size_ += vertices->GetAllocationSize();
   canvas_->drawVertices(vertices->vertices(), blend_mode, *paint.paint());
 }
 
@@ -401,6 +407,7 @@ void Canvas::drawAtlas(const Paint& paint,
   static_assert(sizeof(SkRect) == sizeof(float) * 4,
                 "SkRect doesn't use floats.");
 
+  external_allocation_size_ += atlas->GetAllocationSize();
   canvas_->drawAtlas(
       skImage.get(), reinterpret_cast<const SkRSXform*>(transforms.data()),
       reinterpret_cast<const SkRect*>(rects.data()),
@@ -419,16 +426,16 @@ void Canvas::drawShadow(const CanvasPath* path,
         ToDart("Canvas.drawShader called with non-genuine Path."));
   SkScalar dpr =
       UIDartState::Current()->window()->viewport_metrics().device_pixel_ratio;
+  external_allocation_size_ += path->path().approximateBytesUsed();
   flutter::PhysicalShapeLayer::DrawShadow(canvas_, path->path(), color,
                                           elevation, transparentOccluder, dpr);
 }
 
-void Canvas::Clear() {
+void Canvas::Invalidate() {
+  if (dart_wrapper()) {
+    ClearDartWrapper();
+  }
   canvas_ = nullptr;
-}
-
-bool Canvas::IsRecording() const {
-  return !!canvas_;
 }
 
 }  // namespace flutter

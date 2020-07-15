@@ -21,15 +21,17 @@ class MockTexture : public Texture {
     SkRect bounds;
     bool freeze;
     GrContext* context;
+    SkFilterQuality filter_quality;
   };
 
   explicit MockTexture(int64_t textureId);
 
-  // Called from GPU thread.
+  // Called from raster thread.
   void Paint(SkCanvas& canvas,
              const SkRect& bounds,
              bool freeze,
-             GrContext* context) override;
+             GrContext* context,
+             SkFilterQuality filter_quality) override;
 
   void OnGrContextCreated() override { gr_context_created_ = true; }
   void OnGrContextDestroyed() override { gr_context_destroyed_ = true; }

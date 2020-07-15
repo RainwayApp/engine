@@ -14,10 +14,12 @@
 #include <lib/ui/scenic/cpp/view_ref_pair.h>
 #include <lib/zx/event.h>
 
+#include "flutter/flow/embedded_views.h"
 #include "flutter/fml/macros.h"
 #include "flutter/shell/common/shell.h"
-#include "flutter/shell/common/thread_host.h"
+#include "flutter_runner_product_configuration.h"
 #include "isolate_configurator.h"
+#include "thread.h"
 
 namespace flutter_runner {
 
@@ -39,7 +41,8 @@ class Engine final {
          fuchsia::ui::views::ViewToken view_token,
          scenic::ViewRefPair view_ref_pair,
          UniqueFDIONS fdio_ns,
-         fidl::InterfaceRequest<fuchsia::io::Directory> directory_request);
+         fidl::InterfaceRequest<fuchsia::io::Directory> directory_request,
+         FlutterRunnerProductConfiguration product_config);
   ~Engine();
 
   // Returns the Dart return code for the root isolate if one is present. This
@@ -53,8 +56,8 @@ class Engine final {
  private:
   Delegate& delegate_;
   const std::string thread_label_;
-  flutter::ThreadHost thread_host_;
   flutter::Settings settings_;
+  std::array<std::unique_ptr<Thread>, 3> threads_;
   std::unique_ptr<IsolateConfigurator> isolate_configurator_;
   std::unique_ptr<flutter::Shell> shell_;
   zx::event vsync_event_;
@@ -73,6 +76,12 @@ class Engine final {
                                float height_change_factor);
 
   void OnDebugWireframeSettingsChanged(bool enabled);
+
+  void OnCreateView(int64_t view_id, bool hit_testable, bool focusable);
+
+  void OnDestroyView(int64_t view_id);
+
+  flutter::ExternalViewEmbedder* GetViewEmbedder();
 
   FML_DISALLOW_COPY_AND_ASSIGN(Engine);
 };

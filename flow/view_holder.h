@@ -9,10 +9,10 @@
 #include <fuchsia/ui/views/cpp/fidl.h>
 #include <lib/ui/scenic/cpp/id.h>
 #include <lib/ui/scenic/cpp/resources.h>
-#include <third_party/skia/include/core/SkMatrix.h>
-#include <third_party/skia/include/core/SkPoint.h>
-#include <third_party/skia/include/core/SkSize.h>
 #include <zircon/types.h>
+#include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkPoint.h"
+#include "third_party/skia/include/core/SkSize.h"
 
 #include <memory>
 
@@ -57,16 +57,27 @@ class ViewHolder {
   void UpdateScene(SceneUpdateContext& context,
                    const SkPoint& offset,
                    const SkSize& size,
+                   SkAlpha opacity,
                    bool hit_testable);
+
+  bool hit_testable() { return hit_testable_; }
+  void set_hit_testable(bool value) { hit_testable_ = value; }
+
+  bool focusable() { return focusable_; }
+  void set_focusable(bool value) { focusable_ = value; }
 
  private:
   fml::RefPtr<fml::TaskRunner> ui_task_runner_;
 
   std::unique_ptr<scenic::EntityNode> entity_node_;
+  std::unique_ptr<scenic::OpacityNodeHACK> opacity_node_;
   std::unique_ptr<scenic::ViewHolder> view_holder_;
 
   fuchsia::ui::views::ViewHolderToken pending_view_holder_token_;
   BindCallback pending_bind_callback_;
+
+  bool hit_testable_ = true;
+  bool focusable_ = true;
 
   fuchsia::ui::gfx::ViewProperties pending_properties_;
   bool has_pending_properties_ = false;

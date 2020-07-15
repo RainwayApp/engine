@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// @dart = 2.6
 import 'dart:html';
 
 import 'package:test/test.dart';
@@ -15,6 +16,16 @@ void main() async {
   const double baselineRatio = 1.1662499904632568;
 
   await webOnlyInitializeTestDomRenderer();
+
+  String fallback;
+  setUp(() {
+    if (operatingSystem == OperatingSystem.macOs ||
+        operatingSystem == OperatingSystem.iOs) {
+      fallback = '-apple-system, BlinkMacSystemFont';
+    } else {
+      fallback = 'Arial';
+    }
+  });
 
   test('predictably lays out a single-line paragraph', () {
     for (double fontSize in <double>[10.0, 20.0, 30.0, 40.0]) {
@@ -360,11 +371,14 @@ void main() async {
     expect(paragraph.plainText, isNull);
     final List<SpanElement> spans =
         paragraph.paragraphElement.querySelectorAll('span');
-    expect(spans[0].style.fontFamily, 'Ahem, Arial, sans-serif');
+    expect(spans[0].style.fontFamily, 'Ahem, $fallback, sans-serif');
     // The nested span here should not set it's family to default sans-serif.
-    expect(spans[1].style.fontFamily, 'Ahem, Arial, sans-serif');
-  }, // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
-      skip: (browserEngine == BrowserEngine.firefox));
+    expect(spans[1].style.fontFamily, 'Ahem, $fallback, sans-serif');
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50771
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
+      skip: (browserEngine == BrowserEngine.firefox ||
+          browserEngine == BrowserEngine.edge));
 
   test('adds Arial and sans-serif as fallback fonts', () {
     // Set this to false so it doesn't default to 'Ahem' font.
@@ -378,11 +392,15 @@ void main() async {
     builder.addText('Hello');
 
     final EngineParagraph paragraph = builder.build();
-    expect(paragraph.paragraphElement.style.fontFamily, 'SomeFont, Arial, sans-serif');
+    expect(paragraph.paragraphElement.style.fontFamily,
+        'SomeFont, $fallback, sans-serif');
 
     debugEmulateFlutterTesterEnvironment = true;
-  }, // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
-      skip: (browserEngine == BrowserEngine.firefox));
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50771
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/46638
+      skip: (browserEngine == BrowserEngine.firefox ||
+          browserEngine == BrowserEngine.edge));
 
   test('does not add fallback fonts to generic families', () {
     // Set this to false so it doesn't default to 'Ahem' font.
@@ -413,10 +431,13 @@ void main() async {
     builder.addText('Hello');
 
     final EngineParagraph paragraph = builder.build();
-    expect(paragraph.paragraphElement.style.fontFamily, '"MyFont 2000", Arial, sans-serif');
+    expect(paragraph.paragraphElement.style.fontFamily,
+        '"MyFont 2000", $fallback, sans-serif');
 
     debugEmulateFlutterTesterEnvironment = true;
-  });
+  },
+      // TODO(nurhan): https://github.com/flutter/flutter/issues/50771
+      skip: browserEngine == BrowserEngine.edge);
 
   group('TextRange', () {
     test('empty ranges are correct', () {
@@ -453,24 +474,32 @@ void main() async {
     });
     test('textBefore works', () {
       expect(const TextRange(start: 0, end: 0).textBefore('hello'), isEmpty);
-      expect(const TextRange(start: 1, end: 1).textBefore('hello'), equals('h'));
-      expect(const TextRange(start: 1, end: 2).textBefore('hello'), equals('h'));
-      expect(const TextRange(start: 5, end: 5).textBefore('hello'), equals('hello'));
+      expect(
+          const TextRange(start: 1, end: 1).textBefore('hello'), equals('h'));
+      expect(
+          const TextRange(start: 1, end: 2).textBefore('hello'), equals('h'));
+      expect(const TextRange(start: 5, end: 5).textBefore('hello'),
+          equals('hello'));
       expect(const TextRange(start: 0, end: 5).textBefore('hello'), isEmpty);
     });
     test('textAfter works', () {
-      expect(const TextRange(start: 0, end: 0).textAfter('hello'), equals('hello'));
-      expect(const TextRange(start: 1, end: 1).textAfter('hello'), equals('ello'));
-      expect(const TextRange(start: 1, end: 2).textAfter('hello'), equals('llo'));
+      expect(const TextRange(start: 0, end: 0).textAfter('hello'),
+          equals('hello'));
+      expect(
+          const TextRange(start: 1, end: 1).textAfter('hello'), equals('ello'));
+      expect(
+          const TextRange(start: 1, end: 2).textAfter('hello'), equals('llo'));
       expect(const TextRange(start: 5, end: 5).textAfter('hello'), isEmpty);
       expect(const TextRange(start: 0, end: 5).textAfter('hello'), isEmpty);
     });
     test('textInside works', () {
       expect(const TextRange(start: 0, end: 0).textInside('hello'), isEmpty);
       expect(const TextRange(start: 1, end: 1).textInside('hello'), isEmpty);
-      expect(const TextRange(start: 1, end: 2).textInside('hello'), equals('e'));
+      expect(
+          const TextRange(start: 1, end: 2).textInside('hello'), equals('e'));
       expect(const TextRange(start: 5, end: 5).textInside('hello'), isEmpty);
-      expect(const TextRange(start: 0, end: 5).textInside('hello'), equals('hello'));
+      expect(const TextRange(start: 0, end: 5).textInside('hello'),
+          equals('hello'));
     });
   });
 }

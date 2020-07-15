@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+
 part of engine;
 
 /// Listens to HTML "click" gestures detected by the browser.
@@ -14,7 +15,7 @@ class Tappable extends RoleManager {
   Tappable(SemanticsObject semanticsObject)
       : super(Role.tappable, semanticsObject);
 
-  html.EventListener _clickListener;
+  html.EventListener? _clickListener;
 
   @override
   void update() {
@@ -38,7 +39,7 @@ class Tappable extends RoleManager {
                 GestureMode.browserGestures) {
               return;
             }
-            ui.window.onSemanticsAction(
+            window.invokeOnSemanticsAction(
                 semanticsObject.id, ui.SemanticsAction.tap, null);
           };
           element.addEventListener('click', _clickListener);
