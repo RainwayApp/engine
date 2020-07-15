@@ -31,10 +31,15 @@ class IOSExternalTextureMetal final : public Texture {
   fml::CFRef<CVMetalTextureCacheRef> texture_cache_;
   fml::scoped_nsobject<NSObject<FlutterTexture>> external_texture_;
   std::atomic_bool texture_frame_available_;
+  fml::CFRef<CVPixelBufferRef> last_pixel_buffer_;
   sk_sp<SkImage> external_image_;
 
   // |Texture|
-  void Paint(SkCanvas& canvas, const SkRect& bounds, bool freeze, GrContext* context) override;
+  void Paint(SkCanvas& canvas,
+             const SkRect& bounds,
+             bool freeze,
+             GrContext* context,
+             SkFilterQuality filter_quality) override;
 
   // |Texture|
   void OnGrContextCreated() override;
@@ -48,7 +53,8 @@ class IOSExternalTextureMetal final : public Texture {
   // |Texture|
   void OnTextureUnregistered() override;
 
-  sk_sp<SkImage> WrapExternalPixelBuffer(GrContext* context) const;
+  sk_sp<SkImage> WrapExternalPixelBuffer(fml::CFRef<CVPixelBufferRef> pixel_buffer,
+                                         GrContext* context) const;
 
   FML_DISALLOW_COPY_AND_ASSIGN(IOSExternalTextureMetal);
 };

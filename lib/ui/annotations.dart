@@ -4,7 +4,8 @@
 
 // TODO(dnfield): Remove unused_import ignores when https://github.com/dart-lang/sdk/issues/35164 is resolved.
 
-// @dart = 2.6
+// @dart = 2.9
+
 part of dart.ui;
 
 // TODO(dnfield): Update this if/when we default this to on in the tool,

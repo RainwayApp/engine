@@ -23,7 +23,8 @@
 namespace flutter {
 
 std::string PersistentCache::cache_base_path_;
-std::string PersistentCache::asset_path_;
+
+std::shared_ptr<AssetManager> PersistentCache::asset_manager_;
 
 std::mutex PersistentCache::instance_mutex_;
 std::unique_ptr<PersistentCache> PersistentCache::gPersistentCache;
@@ -78,6 +79,28 @@ void PersistentCache::SetCacheDirectoryPath(std::string path) {
 }
 
 namespace {
+
+constexpr char kEngineComponent[] = "flutter_engine";
+
+static void FreeOldCacheDirectory(const fml::UniqueFD& cache_base_dir) {
+  fml::UniqueFD engine_dir =
+      fml::OpenDirectoryReadOnly(cache_base_dir, kEngineComponent);
+  if (!engine_dir.is_valid()) {
+    return;
+  }
+  fml::VisitFiles(engine_dir, [](const fml::UniqueFD& directory,
+                                 const std::string& filename) {
+    if (filename != GetFlutterEngineVersion()) {
+      auto dir = fml::OpenDirectory(directory, filename.c_str(), false,
+                                    fml::FilePermission::kReadWrite);
+      if (dir.is_valid()) {
+        fml::RemoveDirectoryRecursively(directory, filename.c_str());
+      }
+    }
+    return true;
+  });
+}
+
 static std::shared_ptr<fml::UniqueFD> MakeCacheDirectory(
     const std::string& global_cache_base_path,
     bool read_only,
@@ -91,8 +114,9 @@ static std::shared_ptr<fml::UniqueFD> MakeCacheDirectory(
   }
 
   if (cache_base_dir.is_valid()) {
+    FreeOldCacheDirectory(cache_base_dir);
     std::vector<std::string> components = {
-        "flutter_engine", GetFlutterEngineVersion(), "skia", GetSkiaVersion()};
+        kEngineComponent, GetFlutterEngineVersion(), "skia", GetSkiaVersion()};
     if (cache_sksl) {
       components.push_back(PersistentCache::kSkSLSubdirName);
     }
@@ -149,16 +173,14 @@ std::vector<PersistentCache::SkSLCache> PersistentCache::LoadSkSLs() {
     fml::VisitFiles(*sksl_cache_directory_, visitor);
   }
 
-  fml::UniqueFD root_asset_dir = fml::OpenDirectory(asset_path_.c_str(), false,
-                                                    fml::FilePermission::kRead);
-  fml::UniqueFD sksl_asset_dir =
-      fml::OpenDirectoryReadOnly(root_asset_dir, kSkSLSubdirName);
-  auto sksl_asset_file = fml::OpenFileReadOnly(sksl_asset_dir, kAssetFileName);
-  if (!sksl_asset_file.is_valid()) {
-    FML_LOG(INFO) << "No sksl asset file found.";
+  std::unique_ptr<fml::Mapping> mapping = nullptr;
+  if (asset_manager_ != nullptr) {
+    mapping = asset_manager_->GetAsMapping(kAssetFileName);
+  }
+  if (mapping == nullptr) {
+    FML_LOG(INFO) << "No sksl asset found.";
   } else {
     FML_LOG(INFO) << "Found sksl asset. Loading SkSLs from it...";
-    auto mapping = std::make_unique<fml::FileMapping>(sksl_asset_file);
     rapidjson::Document json_doc;
     rapidjson::ParseResult parse_result =
         json_doc.Parse(reinterpret_cast<const char*>(mapping->GetMapping()),
@@ -334,9 +356,9 @@ fml::RefPtr<fml::TaskRunner> PersistentCache::GetWorkerTaskRunner() const {
   return worker;
 }
 
-void PersistentCache::UpdateAssetPath(const std::string& path) {
-  FML_LOG(INFO) << "PersistentCache::UpdateAssetPath: " << path;
-  asset_path_ = path;
+void PersistentCache::SetAssetManager(std::shared_ptr<AssetManager> value) {
+  TRACE_EVENT_INSTANT0("flutter", "PersistentCache::SetAssetManager");
+  asset_manager_ = value;
 }
 
 }  // namespace flutter

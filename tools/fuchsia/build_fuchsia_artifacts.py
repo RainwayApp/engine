@@ -32,8 +32,7 @@ def IsLinux():
 def IsMac():
   return platform.system() == 'Darwin'
 
-
-def GetPMBinPath():
+def GetFuchsiaSDKPath():
   # host_os references the gn host_os
   # https://gn.googlesource.com/gn/+/master/docs/reference.md#var_host_os
   host_os = ''
@@ -44,7 +43,11 @@ def GetPMBinPath():
   else:
     host_os = 'windows'
 
-  return os.path.join(_src_root_dir, 'fuchsia', 'sdk', host_os, 'tools', 'pm')
+  return os.path.join(_src_root_dir, 'fuchsia', 'sdk', host_os)
+
+
+def GetPMBinPath():
+  return os.path.join(GetFuchsiaSDKPath(), 'tools', 'pm')
 
 
 def RunExecutable(command):
@@ -112,6 +115,8 @@ def CopyGenSnapshotIfExists(source, destination):
                     destination_base, 'kernel_compiler.snapshot')
   FindFileAndCopyTo('frontend_server.dart.snapshot', source_root,
                     destination_base, 'flutter_frontend_server.snapshot')
+  FindFileAndCopyTo('list_libraries.dart.snapshot', source_root,
+                    destination_base, 'list_libraries.snapshot')
 
 
 def CopyFlutterTesterBinIfExists(source, destination):
@@ -149,10 +154,25 @@ def CopyToBucket(src, dst, product=False):
   CopyToBucketWithMode(src, dst, True, product, 'dart')
 
 
+def CopyVulkanDepsToBucket(src, dst, arch):
+  sdk_path = GetFuchsiaSDKPath()
+  deps_bucket_path = os.path.join(_bucket_directory, dst)
+  if not os.path.exists(deps_bucket_path):
+    FindFileAndCopyTo('VkLayer_khronos_validation.json', '%s/pkg' % (sdk_path), deps_bucket_path)
+    FindFileAndCopyTo('VkLayer_khronos_validation.so', '%s/arch/%s' % (sdk_path, arch), deps_bucket_path)
+
+def CopyIcuDepsToBucket(src, dst):
+  source_root = os.path.join(_out_dir, src)
+  deps_bucket_path = os.path.join(_bucket_directory, dst)
+  FindFileAndCopyTo('icudtl.dat', source_root, deps_bucket_path)
+
 def BuildBucket(runtime_mode, arch, product):
   out_dir = 'fuchsia_%s_%s/' % (runtime_mode, arch)
   bucket_dir = 'flutter/%s/%s/' % (arch, runtime_mode)
+  deps_dir = 'flutter/%s/deps/' % (arch)
   CopyToBucket(out_dir, bucket_dir, product)
+  CopyVulkanDepsToBucket(out_dir, deps_dir, arch)
+  CopyIcuDepsToBucket(out_dir, deps_dir)
 
 
 def ProcessCIPDPackage(upload, engine_version):
@@ -202,14 +222,14 @@ def GetRunnerTarget(runner_type, product, aot):
   return base + target
 
 
-def GetTargetsToBuild(product=False):
+def GetTargetsToBuild(product=False, additional_targets=[]):
   targets_to_build = [
       'flutter/shell/platform/fuchsia:fuchsia',
-  ]
+  ] + additional_targets
   return targets_to_build
 
 
-def BuildTarget(runtime_mode, arch, product, enable_lto):
+def BuildTarget(runtime_mode, arch, product, enable_lto, additional_targets=[]):
   out_dir = 'fuchsia_%s_%s' % (runtime_mode, arch)
   flags = [
       '--fuchsia',
@@ -219,10 +239,8 @@ def BuildTarget(runtime_mode, arch, product, enable_lto):
       runtime_mode,
   ]
 
-  # Always disable lto until https://github.com/flutter/flutter/issues/44841
-  # gets fixed.
-  # if not enable_lto:
-  flags.append('--no-lto')
+  if not enable_lto:
+    flags.append('--no-lto')
 
   RunGN(out_dir, flags)
   BuildNinjaTargets(out_dir, GetTargetsToBuild(product))
@@ -265,6 +283,12 @@ def main():
       default=False,
       help='If set, skips building and just creates packages.')
 
+  parser.add_argument(
+      '--targets',
+      default='',
+      help=('Comma-separated list; adds additional targets to build for '
+           'Fuchsia.'))
+
   args = parser.parse_args()
   RemoveDirectoryIfExists(_bucket_directory)
   build_mode = args.runtime_mode
@@ -281,7 +305,8 @@ def main():
       product = product_modes[i]
       if build_mode == 'all' or runtime_mode == build_mode:
         if not args.skip_build:
-          BuildTarget(runtime_mode, arch, product, enable_lto)
+          BuildTarget(runtime_mode, arch, product, enable_lto,
+                      args.targets.split(","))
         BuildBucket(runtime_mode, arch, product)
 
   if args.upload:

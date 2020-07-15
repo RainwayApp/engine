@@ -12,6 +12,7 @@
 
 #include "flutter/common/settings.h"
 #include "flutter/common/task_runners.h"
+#include "flutter/flow/surface.h"
 #include "flutter/flow/texture.h"
 #include "flutter/fml/closure.h"
 #include "flutter/fml/macros.h"
@@ -33,7 +34,6 @@
 #include "flutter/shell/common/platform_view.h"
 #include "flutter/shell/common/rasterizer.h"
 #include "flutter/shell/common/shell_io_manager.h"
-#include "flutter/shell/common/surface.h"
 
 namespace flutter {
 
@@ -255,7 +255,7 @@ class Shell final : public PlatformView::Delegate,
   ///
   /// @return     A weak pointer to the rasterizer.
   ///
-  fml::WeakPtr<Rasterizer> GetRasterizer() const;
+  fml::TaskRunnerAffineWeakPtr<Rasterizer> GetRasterizer() const;
 
   //------------------------------------------------------------------------------
   /// @brief      Engines may only be accessed on the UI thread. This method is
@@ -378,8 +378,9 @@ class Shell final : public PlatformView::Delegate,
   std::unique_ptr<ShellIOManager> io_manager_;   // on IO task runner
   std::shared_ptr<fml::SyncSwitch> is_gpu_disabled_sync_switch_;
 
-  fml::WeakPtr<Engine> weak_engine_;          // to be shared across threads
-  fml::WeakPtr<Rasterizer> weak_rasterizer_;  // to be shared across threads
+  fml::WeakPtr<Engine> weak_engine_;  // to be shared across threads
+  fml::TaskRunnerAffineWeakPtr<Rasterizer>
+      weak_rasterizer_;  // to be shared across threads
   fml::WeakPtr<PlatformView>
       weak_platform_view_;  // to be shared across threads
 
@@ -481,6 +482,10 @@ class Shell final : public PlatformView::Delegate,
   // |PlatformView::Delegate|
   void OnPlatformViewSetNextFrameCallback(const fml::closure& closure) override;
 
+  // |PlatformView::Delegate|
+  std::unique_ptr<std::vector<std::string>> ComputePlatformViewResolvedLocale(
+      const std::vector<std::string>& supported_locale_data) override;
+
   // |Animator::Delegate|
   void OnAnimatorBeginFrame(fml::TimePoint frame_target_time) override;
 
@@ -488,8 +493,8 @@ class Shell final : public PlatformView::Delegate,
   void OnAnimatorNotifyIdle(int64_t deadline) override;
 
   // |Animator::Delegate|
-  void OnAnimatorDraw(
-      fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) override;
+  void OnAnimatorDraw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline,
+                      fml::TimePoint frame_target_time) override;
 
   // |Animator::Delegate|
   void OnAnimatorDrawLastLayerTree() override;
@@ -514,6 +519,10 @@ class Shell final : public PlatformView::Delegate,
 
   // |Engine::Delegate|
   void SetNeedsReportTimings(bool value) override;
+
+  // |Engine::Delegate|
+  std::unique_ptr<std::vector<std::string>> ComputePlatformResolvedLocale(
+      const std::vector<std::string>& supported_locale_data) override;
 
   // |Rasterizer::Delegate|
   void OnFrameRasterized(const FrameTiming&) override;
@@ -579,7 +588,7 @@ class Shell final : public PlatformView::Delegate,
 
   // For accessing the Shell via the raster thread, necessary for various
   // rasterizer callbacks.
-  std::unique_ptr<fml::WeakPtrFactory<Shell>> weak_factory_gpu_;
+  std::unique_ptr<fml::TaskRunnerAffineWeakPtrFactory<Shell>> weak_factory_gpu_;
 
   friend class testing::ShellTest;
 

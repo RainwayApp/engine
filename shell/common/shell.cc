@@ -20,7 +20,6 @@
 #include "flutter/fml/trace_event.h"
 #include "flutter/fml/unique_fd.h"
 #include "flutter/runtime/dart_vm.h"
-#include "flutter/runtime/start_up.h"
 #include "flutter/shell/common/engine.h"
 #include "flutter/shell/common/persistent_cache.h"
 #include "flutter/shell/common/skia_event_tracer_impl.h"
@@ -175,12 +174,6 @@ std::unique_ptr<Shell> Shell::CreateShellOnPlatformThread(
   return shell;
 }
 
-static void RecordStartupTimestamp() {
-  if (engine_main_enter_ts == 0) {
-    engine_main_enter_ts = Dart_TimelineGetMicros();
-  }
-}
-
 static void Tokenize(const std::string& input,
                      std::vector<std::string>* results,
                      char delimiter) {
@@ -197,7 +190,7 @@ static void Tokenize(const std::string& input,
 // TODO(chinmaygarde): The unfortunate side effect of this call is that settings
 // that cause shell initialization failures will still lead to some of their
 // settings being applied.
-static void PerformInitializationTasks(const Settings& settings) {
+static void PerformInitializationTasks(Settings& settings) {
   {
     fml::LogSettings log_settings;
     log_settings.min_log_level =
@@ -207,7 +200,10 @@ static void PerformInitializationTasks(const Settings& settings) {
 
   static std::once_flag gShellSettingsInitialization = {};
   std::call_once(gShellSettingsInitialization, [&settings] {
-    RecordStartupTimestamp();
+    if (settings.engine_start_timestamp.count() == 0) {
+      settings.engine_start_timestamp =
+          std::chrono::microseconds(Dart_TimelineGetMicros());
+    }
 
     tonic::SetLogHandler(
         [](const char* message) { FML_LOG(ERROR) << message; });
@@ -216,10 +212,10 @@ static void PerformInitializationTasks(const Settings& settings) {
       InitSkiaEventTracer(settings.trace_skia);
     }
 
-    if (!settings.trace_whitelist.empty()) {
+    if (!settings.trace_allowlist.empty()) {
       std::vector<std::string> prefixes;
-      Tokenize(settings.trace_whitelist, &prefixes, ',');
-      fml::tracing::TraceSetWhitelist(prefixes);
+      Tokenize(settings.trace_allowlist, &prefixes, ',');
+      fml::tracing::TraceSetAllowlist(prefixes);
     }
 
     if (!settings.skia_deterministic_rendering_on_cpu) {
@@ -342,7 +338,7 @@ Shell::Shell(DartVMRef vm, TaskRunners task_runners, Settings settings)
   fml::TaskRunner::RunNowOrPostTask(
       task_runners_.GetRasterTaskRunner(), fml::MakeCopyable([this]() mutable {
         this->weak_factory_gpu_ =
-            std::make_unique<fml::WeakPtrFactory<Shell>>(this);
+            std::make_unique<fml::TaskRunnerAffineWeakPtrFactory<Shell>>(this);
       }));
 
   // Install service protocol handlers.
@@ -435,6 +431,9 @@ Shell::~Shell() {
 }
 
 void Shell::NotifyLowMemoryWarning() const {
+  auto trace_id = fml::tracing::TraceNonce();
+  TRACE_EVENT_ASYNC_BEGIN0("flutter", "Shell::NotifyLowMemoryWarning",
+                           trace_id);
   // This does not require a current isolate but does require a running VM.
   // Since a valid shell will not be returned to the embedder without a valid
   // DartVMRef, we can be certain that this is a safe spot to assume a VM is
@@ -442,10 +441,12 @@ void Shell::NotifyLowMemoryWarning() const {
   ::Dart_NotifyLowMemory();
 
   task_runners_.GetRasterTaskRunner()->PostTask(
-      [rasterizer = rasterizer_->GetWeakPtr()]() {
+      [rasterizer = rasterizer_->GetWeakPtr(), trace_id = trace_id]() {
         if (rasterizer) {
           rasterizer->NotifyLowMemoryWarning();
         }
+        TRACE_EVENT_ASYNC_END0("flutter", "Shell::NotifyLowMemoryWarning",
+                               trace_id);
       });
   // The IO Manager uses resource cache limits of 0, so it is not necessary
   // to purge them.
@@ -546,6 +547,14 @@ bool Shell::Setup(std::unique_ptr<PlatformView> platform_view,
   weak_rasterizer_ = rasterizer_->GetWeakPtr();
   weak_platform_view_ = platform_view_->GetWeakPtr();
 
+  // Setup the time-consuming default font manager right after engine created.
+  fml::TaskRunner::RunNowOrPostTask(task_runners_.GetUITaskRunner(),
+                                    [engine = weak_engine_] {
+                                      if (engine) {
+                                        engine->SetupDefaultFontManager();
+                                      }
+                                    });
+
   is_setup_ = true;
 
   vm_->GetServiceProtocol()->AddHandler(this, GetServiceProtocolDescription());
@@ -575,7 +584,7 @@ const TaskRunners& Shell::GetTaskRunners() const {
   return task_runners_;
 }
 
-fml::WeakPtr<Rasterizer> Shell::GetRasterizer() const {
+fml::TaskRunnerAffineWeakPtr<Rasterizer> Shell::GetRasterizer() const {
   FML_DCHECK(is_setup_);
   return weak_rasterizer_;
 }
@@ -956,8 +965,19 @@ void Shell::OnAnimatorNotifyIdle(int64_t deadline) {
 }
 
 // |Animator::Delegate|
-void Shell::OnAnimatorDraw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline) {
+void Shell::OnAnimatorDraw(fml::RefPtr<Pipeline<flutter::LayerTree>> pipeline,
+                           fml::TimePoint frame_target_time) {
   FML_DCHECK(is_setup_);
+
+  // record the target time for use by rasterizer.
+  {
+    std::scoped_lock time_recorder_lock(time_recorder_mutex_);
+    if (!latest_frame_target_time_) {
+      latest_frame_target_time_ = frame_target_time;
+    } else if (latest_frame_target_time_ < frame_target_time) {
+      latest_frame_target_time_ = frame_target_time;
+    }
+  }
 
   task_runners_.GetRasterTaskRunner()->PostTask(
       [&waiting_for_first_frame = waiting_for_first_frame_,
@@ -1081,6 +1101,19 @@ void Shell::UpdateIsolateDescription(const std::string isolate_name,
 
 void Shell::SetNeedsReportTimings(bool value) {
   needs_report_timings_ = value;
+}
+
+// |Engine::Delegate|
+std::unique_ptr<std::vector<std::string>> Shell::ComputePlatformResolvedLocale(
+    const std::vector<std::string>& supported_locale_data) {
+  return ComputePlatformViewResolvedLocale(supported_locale_data);
+}
+
+// |PlatformView::Delegate|
+std::unique_ptr<std::vector<std::string>>
+Shell::ComputePlatformViewResolvedLocale(
+    const std::vector<std::string>& supported_locale_data) {
+  return platform_view_->ComputePlatformResolvedLocales(supported_locale_data);
 }
 
 void Shell::ReportTimings() {
@@ -1312,7 +1345,6 @@ bool Shell::OnServiceProtocolRunInView(
   configuration.AddAssetResolver(
       std::make_unique<DirectoryAssetBundle>(fml::OpenDirectory(
           asset_directory_path.c_str(), false, fml::FilePermission::kRead)));
-  PersistentCache::UpdateAssetPath(asset_directory_path);
 
   auto& allocator = response.GetAllocator();
   response.SetObject();
@@ -1407,7 +1439,6 @@ bool Shell::OnServiceProtocolSetAssetBundlePath(
   asset_manager->PushFront(std::make_unique<DirectoryAssetBundle>(
       fml::OpenDirectory(params.at("assetDirectory").data(), false,
                          fml::FilePermission::kRead)));
-  PersistentCache::UpdateAssetPath(params.at("assetDirectory").data());
 
   if (engine_->UpdateAssetManager(std::move(asset_manager))) {
     response.AddMember("type", "Success", allocator);

@@ -26,30 +26,40 @@ IOSExternalTextureMetal::~IOSExternalTextureMetal() = default;
 void IOSExternalTextureMetal::Paint(SkCanvas& canvas,
                                     const SkRect& bounds,
                                     bool freeze,
-                                    GrContext* context) {
+                                    GrContext* context,
+                                    SkFilterQuality filter_quality) {
   const bool needs_updated_texture = (!freeze && texture_frame_available_) || !external_image_;
 
   if (needs_updated_texture) {
+    auto pixel_buffer = fml::CFRef<CVPixelBufferRef>([external_texture_ copyPixelBuffer]);
+    if (!pixel_buffer) {
+      pixel_buffer = std::move(last_pixel_buffer_);
+    }
+
     // If the application told us there was a texture frame available but did not provide one when
     // asked for it, reuse the previous texture but make sure to ask again the next time around.
-    if (auto wrapped_texture = WrapExternalPixelBuffer(context)) {
+    if (auto wrapped_texture = WrapExternalPixelBuffer(pixel_buffer, context)) {
       external_image_ = wrapped_texture;
       texture_frame_available_ = false;
+      last_pixel_buffer_ = std::move(pixel_buffer);
     }
   }
 
   if (external_image_) {
+    SkPaint paint;
+    paint.setFilterQuality(filter_quality);
     canvas.drawImageRect(external_image_,                                      // image
                          external_image_->bounds(),                            // source rect
                          bounds,                                               // destination rect
-                         nullptr,                                              // paint
+                         &paint,                                               // paint
                          SkCanvas::SrcRectConstraint::kFast_SrcRectConstraint  // constraint
     );
   }
 }
 
-sk_sp<SkImage> IOSExternalTextureMetal::WrapExternalPixelBuffer(GrContext* context) const {
-  auto pixel_buffer = fml::CFRef<CVPixelBufferRef>([external_texture_ copyPixelBuffer]);
+sk_sp<SkImage> IOSExternalTextureMetal::WrapExternalPixelBuffer(
+    fml::CFRef<CVPixelBufferRef> pixel_buffer,
+    GrContext* context) const {
   if (!pixel_buffer) {
     return nullptr;
   }
@@ -126,6 +136,10 @@ void IOSExternalTextureMetal::OnGrContextCreated() {
 }
 
 void IOSExternalTextureMetal::OnGrContextDestroyed() {
+  // The image must be reset because it is tied to the onscreen context. But the pixel buffer that
+  // created the image is still around. In case of context reacquisition, that last pixel
+  // buffer will be used to materialize the image in case the application fails to provide a new
+  // one.
   external_image_.reset();
   CVMetalTextureCacheFlush(texture_cache_,  // cache
                            0                // options (must be zero)

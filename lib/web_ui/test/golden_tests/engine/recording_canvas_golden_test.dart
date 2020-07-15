@@ -641,7 +641,7 @@ void main() async {
       await matchGoldenFile(
         'paint_spread_bounds.png',
         region: const Rect.fromLTRB(0, 0, 250, 600),
-        maxDiffRatePercent: 0.0,
+        maxDiffRatePercent: 0.01,
         pixelComparison: PixelComparison.precise,
       );
     } finally {
@@ -652,7 +652,8 @@ void main() async {
 
 typedef PaintSpreadPainter = void Function(RecordingCanvas canvas, SurfacePaint paint);
 
-const String _base64Encoded20x20TestImage = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAIAAAAC64paAAAACXBIWXMAAC4jAAAuIwF4pT92AAAA'
+const String _base64Encoded20x20TestImage = 'iVBORw0KGgoAAAANSUhEUgAAABQAAAAUC'
+    'AIAAAAC64paAAAACXBIWXMAAC4jAAAuIwF4pT92AAAA'
   'B3RJTUUH5AMFFBksg4i3gQAAABl0RVh0Q29tbWVudABDcmVhdGVkIHdpdGggR0lNUFeBDhcAAAAj'
   'SURBVDjLY2TAC/7jlWVioACMah4ZmhnxpyHG0QAb1UyZZgBjWAIm/clP0AAAAABJRU5ErkJggg==';
 
