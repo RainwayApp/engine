@@ -201,10 +201,12 @@ typedef enum UIAccessibilityContrast : NSInteger {
                  name:@(flutter::kOrientationUpdateNotificationName)
                object:nil];
 
+#if !TARGET_OS_TV
   [center addObserver:self
              selector:@selector(onPreferredStatusBarStyleUpdated:)
                  name:@(flutter::kOverlayStyleUpdateNotificationName)
                object:nil];
+#endif
 
   [center addObserver:self
              selector:@selector(applicationBecameActive:)
@@ -679,8 +681,9 @@ static flutter::PointerData::Change PointerDataChangeFromUITouchPhase(UITouchPha
     default:
       // TODO(53695): Handle the `UITouchPhaseRegion`... enum values.
       FML_DLOG(INFO) << "Unhandled touch phase: " << phase;
-      return flutter::PointerData::Change::kCancel;
+      break;
   }
+  return flutter::PointerData::Change::kCancel;
 }
 
 static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) {
@@ -694,9 +697,10 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
       default:
         // TODO(53696): Handle the UITouchTypeIndirectPointer enum value.
         FML_DLOG(INFO) << "Unhandled touch type: " << touch.type;
-        return flutter::PointerData::DeviceKind::kTouch;
+        break;
     }
   }
+  return flutter::PointerData::DeviceKind::kTouch;
 }
 
 // Dispatches the UITouches to the engine. Usually, the type of change of the touch is determined
@@ -1017,9 +1021,11 @@ static flutter::PointerData::DeviceKind DeviceKindFromTouchType(UITouch* touch) 
 - (void)setIsHomeIndicatorHidden:(BOOL)hideHomeIndicator {
   if (hideHomeIndicator != _isHomeIndicatorHidden) {
     _isHomeIndicatorHidden = hideHomeIndicator;
+#if !TARGET_OS_TV
     if (@available(iOS 11, *)) {
       [self setNeedsUpdateOfHomeIndicatorAutoHidden];
     }
+#endif
   }
 }
 

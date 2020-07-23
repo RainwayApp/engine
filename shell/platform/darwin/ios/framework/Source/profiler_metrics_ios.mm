@@ -32,8 +32,8 @@ class MachThreads {
 namespace flutter {
 namespace {
 
-#if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_DEBUG || \
-    FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_PROFILE
+#if (FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_DEBUG || \
+    FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_PROFILE) && !TARGET_OS_TV
 
 template <typename T>
 T ClearValue() {
@@ -138,7 +138,7 @@ std::optional<GpuUsageInfo> FindGpuUsageInfo(io_iterator_t iterator) {
 
 std::optional<GpuUsageInfo> PollGpuUsage() {
 #if (FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_RELEASE || \
-     FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_JIT_RELEASE)
+     FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_JIT_RELEASE || TARGET_OS_TV)
   return std::nullopt;
 #elif TARGET_IPHONE_SIMULATOR
   return FindSimulatorGpuUsageInfo();

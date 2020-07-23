@@ -152,6 +152,7 @@ constexpr int32_t kRootNodeId = 0;
 /// A proxy class for SemanticsObject and UISwitch.  For most Accessibility and
 /// SemanticsObject methods it delegates to the semantics object, otherwise it
 /// sends messages to the UISwitch.
+API_UNAVAILABLE(tvos)
 @interface FlutterSwitchSemanticsObject : UISwitch
 - (instancetype)initWithSemanticsObject:(SemanticsObject*)semanticsObject;
 @end

@@ -21,10 +21,17 @@ bool ShouldUseMetalRenderer() {
   // past iOS 10.0. The processor was selected as it is the first version at which Metal was
   // supported. The iOS version floor was selected due to the availability of features used by Skia.
   bool ios_version_supports_metal = false;
-  if (@available(iOS 10.0, *)) {
+#if TARGET_OS_IOS
+  if (@available(iOS 10.0)) {
     auto device = MTLCreateSystemDefaultDevice();
     ios_version_supports_metal = [device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily1_v3];
   }
+#elif TARGET_OS_TV
+  if (@available(tvOS 11.0, *)) {
+    auto device = MTLCreateSystemDefaultDevice();
+    ios_version_supports_metal = [device supportsFeatureSet:MTLFeatureSet_tvOS_GPUFamily1_v3];
+  }
+#endif
   return ios_version_supports_metal;
 }
 #endif  // FLUTTER_SHELL_ENABLE_METAL

@@ -100,7 +100,7 @@ static UITextContentType ToUITextContentType(NSArray<NSString*>* hints) {
   }
 
   NSString* hint = hints[0];
-  if (@available(iOS 10.0, *)) {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if ([hint isEqualToString:@"addressCityAndState"]) {
       return UITextContentTypeAddressCityAndState;
     }
@@ -190,13 +190,13 @@ static UITextContentType ToUITextContentType(NSArray<NSString*>* hints) {
     }
   }
 
-  if (@available(iOS 11.0, *)) {
+  if (@available(iOS 11.0, tvOS 11.0, *)) {
     if ([hint isEqualToString:@"password"]) {
       return UITextContentTypePassword;
     }
   }
 
-  if (@available(iOS 12.0, *)) {
+  if (@available(iOS 12.0, tvOS 12.0, *)) {
     if ([hint isEqualToString:@"oneTimeCode"]) {
       return UITextContentTypeOneTimeCode;
     }
@@ -992,7 +992,7 @@ static NSString* uniqueIdFromDictionary(NSDictionary* dictionary) {
   inputView.autocorrectionType = autocorrect && ![autocorrect boolValue]
                                      ? UITextAutocorrectionTypeNo
                                      : UITextAutocorrectionTypeDefault;
-  if (@available(iOS 10.0, *)) {
+  if (@available(iOS 10.0, tvOS 10.0, *)) {
     if (autofill == nil) {
       inputView.textContentType = @"";
     } else {

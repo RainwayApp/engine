@@ -144,7 +144,7 @@ void AccessibilityBridge::UpdateSemantics(flutter::SemanticsNodeUpdates nodes,
       // Android.
       NSString* announcement =
           [[[NSString alloc] initWithUTF8String:object.node.label.c_str()] autorelease];
-      if (@available(iOS 11.0, *)) {
+      if (@available(iOS 11.0, tvOS 11.0, *)) {
         UIAccessibilityPostNotification(
             UIAccessibilityAnnouncementNotification,
             [[[NSAttributedString alloc]
@@ -241,12 +241,14 @@ static SemanticsObject* CreateObject(const flutter::SemanticsNode& node,
       !node.HasFlag(flutter::SemanticsFlags::kIsReadOnly)) {
     // Text fields are backed by objects that implement UITextInput.
     return [[[TextInputSemanticsObject alloc] initWithBridge:weak_ptr uid:node.id] autorelease];
+#if !TARGET_OS_TV
   } else if (node.HasFlag(flutter::SemanticsFlags::kHasToggledState) ||
              node.HasFlag(flutter::SemanticsFlags::kHasCheckedState)) {
     SemanticsObject* delegateObject =
         [[[FlutterSemanticsObject alloc] initWithBridge:weak_ptr uid:node.id] autorelease];
     return (SemanticsObject*)[[[FlutterSwitchSemanticsObject alloc]
         initWithSemanticsObject:delegateObject] autorelease];
+#endif
   } else {
     return [[[FlutterSemanticsObject alloc] initWithBridge:weak_ptr uid:node.id] autorelease];
   }
